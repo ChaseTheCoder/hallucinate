@@ -1,4 +1,4 @@
-# Gaime (minimal)
+# Hallucinate (minimal)
 
 Simple Next.js app with frontend and backend API routes to create and join games.
 
@@ -6,7 +6,7 @@ Install & run:
 
 ```bash
 # macOS / zsh
-cd gaime
+cd hallucinate
 npm install
 npm run dev
 ```
