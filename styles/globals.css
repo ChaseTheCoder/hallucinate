@@ -1,0 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+html,body,#__next{height:100%; overflow: hidden}
+body{font-family: Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; color: #5A5A5A; margin: 0; padding: 0}
+button{cursor:pointer; font-family: Roboto, sans-serif}
+input{padding:8px; color: #5A5A5A}
+a{color: #5A5A5A}
+h1,h2,h3,h4,h5,h6{color: #5A5A5A}
+
+.button {
+  padding: 12px 24px;
+  background-color: transparent;
+  color: #5A5A5A;
+  border: 1px solid #5A5A5A;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1em;
+  font-family: Roboto, sans-serif;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.button:hover {
+  background-color: #f0f0f0;
+}
+
+.button:active {
+  opacity: 0.8;
+}
+
+@keyframes blob-pulse {
+  0% {
+    transform: scale(1) translate(0, 0);
+    opacity: 0.4;
+  }
+  25% {
+    transform: scale(1.05) translate(2px, -3px);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.1) translate(-1px, 2px);
+    opacity: 0.3;
+  }
+  75% {
+    transform: scale(1.03) translate(3px, 1px);
+    opacity: 0.35;
+  }
+  100% {
+    transform: scale(1) translate(0, 0);
+    opacity: 0.4;
+  }
+}
+
+@keyframes blob-morph {
+  0% {
+    border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  }
+  25% {
+    border-radius: 40% 60% 70% 30% / 40% 70% 30% 60%;
+  }
+  50% {
+    border-radius: 70% 30% 40% 60% / 30% 60% 60% 40%;
+  }
+  75% {
+    border-radius: 30% 70% 60% 40% / 70% 40% 60% 30%;
+  }
+  100% {
+    border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  }
+}
+
+.blob {
+  background: radial-gradient(circle at 50% 50%, rgba(10, 10, 10, 1) 0%, rgba(20, 20, 20, 0.6) 30%, rgba(30, 30, 30, 0.2) 60%, rgba(40, 40, 40, 0) 100%);
+  border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  animation: blob-pulse 6s ease-in-out infinite, blob-morph 8s ease-in-out infinite;
+  filter: blur(1px);
+}
