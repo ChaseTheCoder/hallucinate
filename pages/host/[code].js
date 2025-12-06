@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/router'
 import io from 'socket.io-client'
-import Button from '../../components/Button'
-import Blob from '../../components/Blob'
+import Lucin from '../../components/Lucin'
 
 let socket = null
 
@@ -56,34 +56,22 @@ export default function HostPage() {
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'space-between',
       minHeight: '100vh',
-      padding: 24
+      margin: 24
     }}>
-      {/* Top Half - Blob and Code */}
+      {/* Top Half - Lucin and Code */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'space-between', // top spacer, Blob, Code -> Blob centered between top and Code
+        justifyContent: 'center',
         flex: 1,
         gap: 20,
-        width: '100%'
+        width: '100%',
+        height: '50%',
+        position: 'relative'
       }}>
-        <div style={{ height: 0 }} /> {/* spacer at the very top */}
-
-        <Blob size={200}/>
-
-        <div style={{
-          fontSize: '2em',
-          fontFamily: 'monospace',
-          fontWeight: 'bold',
-          color: '#5A5A5A',
-          marginBottom: 0
-        }}>
-          Code: {code}
-        </div>
+        <Lucin height='40vh'/>
       </div>
 
       {/* Bottom Half - Players */}
@@ -91,10 +79,10 @@ export default function HostPage() {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
         flex: 1,
         gap: 24,
-        width: '100%'
+        width: '100%',
+        height: '50%'
       }}>
         <div style={{
           display: 'flex',
@@ -123,15 +111,21 @@ export default function HostPage() {
             ))
           )}
         </div>
-
-        <Button onClick={() => router.push('/')}>Back to Home</Button>
-        
+        <div style={{
+          fontSize: '2em',
+          fontFamily: 'monospace',
+          fontWeight: 'bold',
+          color: '#5A5A5A',
+          marginBottom: 0
+        }}>
+          Code: {code}
+        </div>
         <div style={{
           fontSize: '0.75em',
           color: '#5A5A5A',
           marginTop: 8
         }}>
-          Status: {connected ? '🟢 Connected' : '🔴 Connecting...'}
+          <Link href='/'>End Game</Link> | Status: {connected ? '🟢 Connected' : '🔴 Connecting...'}
         </div>
       </div>
     </div>

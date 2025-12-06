@@ -1,0 +1,48 @@
+@keyframes lucin-pulse {
+  0% {
+    transform: scale(1) translate(0, 0);
+    opacity: 0.4;
+  }
+  25% {
+    transform: scale(1.05) translate(2px, -3px);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.1) translate(-1px, 2px);
+    opacity: 0.3;
+  }
+  75% {
+    transform: scale(1.03) translate(3px, 1px);
+    opacity: 0.35;
+  }
+  100% {
+    transform: scale(1) translate(0, 0);
+    opacity: 0.4;
+  }
+}
+
+@keyframes lucin-morph {
+  0% {
+    border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  }
+  25% {
+    border-radius: 40% 60% 70% 30% / 40% 70% 30% 60%;
+  }
+  50% {
+    border-radius: 70% 30% 40% 60% / 30% 60% 60% 40%;
+  }
+  75% {
+    border-radius: 30% 70% 60% 40% / 70% 40% 60% 30%;
+  }
+  100% {
+    border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  }
+}
+
+.lucin {
+  background: radial-gradient(circle at 50% 50%, rgba(10, 10, 10, 1) 0%, rgba(20, 20, 20, 0.6) 30%, rgba(30, 30, 30, 0.2) 60%, rgba(40, 40, 40, 0) 100%);
+  border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  animation: lucin-pulse 6s ease-in-out infinite, lucin-morph 8s ease-in-out infinite;
+  filter: blur(1px);
+  aspect-ratio: 1 / 1;
+}
