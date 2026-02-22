@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
-import Button from '../components/Button'
+import Button from '../../components/Button'
 
 export default function Join() {
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [error, setError] = useState('')
-  const [gameData, setGameData] = useState(null)
+  const [gameData, setGameData] = useState<{ code: string, players: any[] } | null>(null)
   const [loading, setLoading] = useState(false)
-  const [storedPlayer, setStoredPlayer] = useState(null)
+  const [storedPlayer, setStoredPlayer] = useState<{ code: string, name: string } | null>(null)
   const router = useRouter()
+  
 
   // Load stored player info on mount
   useEffect(() => {
@@ -20,7 +21,7 @@ export default function Join() {
     }
   }, [])
 
-  function savePlayerToStorage(gameCode, playerName) {
+  function savePlayerToStorage(gameCode: string, playerName: string) {
     localStorage.setItem('currentPlayer', JSON.stringify({ code: gameCode, name: playerName }))
   }
 
@@ -28,11 +29,11 @@ export default function Join() {
     localStorage.removeItem('currentPlayer')
   }
 
-  async function handleJoin(e) {
+  async function handleJoin(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     if (!code || !name) return setError('Enter code and name')
-    const res = await fetch(`/api/games/${code}/join`, {
+    const res = await fetch(`/api/game/${code}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
@@ -46,22 +47,24 @@ export default function Join() {
     router.push(`/player/${code}?name=${encodeURIComponent(name)}`)
   }
 
-  async function handleRejoin(playerName) {
+  async function handleRejoin(playerName: string) {
     // Rejoin with existing player name
-    const res = await fetch(`/api/games/${code}/join`, {
+    setError('')
+    const res = await fetch(`/api/game/${code}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: playerName })
     })
     if (!res.ok) {
-      setError('Failed to rejoin')
+      const j = await res.json()
+      setError(j.error || 'Failed to rejoin')
       return
     }
     savePlayerToStorage(code, playerName)
     router.push(`/player/${code}?name=${encodeURIComponent(playerName)}`)
   }
 
-  async function handleCodeSubmit(e) {
+  async function handleCodeSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!code) {
       setError('Enter a code')
@@ -70,7 +73,7 @@ export default function Join() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`/api/games/${code}`)
+      const res = await fetch(`/api/game/${code}`)
       if (!res.ok) {
         setError('Game not found')
         setGameData(null)

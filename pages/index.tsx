@@ -8,7 +8,7 @@ export default function Home() {
       <h1>Hallucinate</h1>
       <div style={{display:'flex',gap:36,flexDirection:'column'}}>
         <Button href="/join">Join Game</Button>
-        <Button href="/start">Start Game</Button>
+        <Button href="/host">Start Game</Button>
       </div>
     </div>
   )
