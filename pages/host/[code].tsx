@@ -11,13 +11,17 @@ let socket: Socket | null = null
 export default function HostPage() {
   const router = useRouter()
   const { code } = router.query
+  const gameCode = Array.isArray(code) ? code[0] : code
   const [game, setGame] = useState<Game | null>(null)
   const [content, setContent] = useState<typeof gameContent[keyof typeof gameContent] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [didLoadAttempted, setDidLoadAttempted] = useState(false)
   const [connected, setConnected] = useState(false)
+  const [isSubscribed, setIsSubscribed] = useState(false)
   const listenersSetupRef = useRef(false)
 
   useEffect(() => {
-    if (!code) return
+    if (!gameCode) return
 
     // Initialize socket connection once
     if (!socket) {
@@ -31,6 +35,7 @@ export default function HostPage() {
       socket.on('disconnect', () => {
         console.log('Socket disconnected')
         setConnected(false)
+        setIsSubscribed(false)
       })
 
       socket.on('error', (message) => {
@@ -64,26 +69,28 @@ export default function HostPage() {
       listenersSetupRef.current = true
     }
 
-    // Subscribe to game when connected
-    if (connected && code) {
-      console.log('Subscribing to game:', code)
-      socket.emit('subscribe-to-game', code)
-    }
-
     // Fetch initial game state
-    if (!game && code) {
-      fetch(`/api/game/${code}`, { cache: 'no-store' })
+    if (!game && gameCode && !didLoadAttempted) {
+      setDidLoadAttempted(true)
+      setLoadError(null)
+      fetch(`/api/game/${gameCode}`, { cache: 'no-store' })
         .then(res => {
-          if (!res.ok) throw new Error('Game not found')
+          if (!res.ok) {
+            const message = res.status === 404
+              ? 'Game not found'
+              : 'Failed to load game'
+            throw new Error(message)
+          }
           return res.json()
         })
         .then(data => {
           console.log('Fetched initial game data:', data)
+          setLoadError(null)
           setGame(data)
         })
         .catch(err => {
           console.error('Error fetching game:', err)
-          router.push('/')
+          setLoadError(err instanceof Error ? err.message : 'Unable to fetch game')
         })
     }
 
@@ -95,7 +102,15 @@ export default function HostPage() {
         listenersSetupRef.current = false
       }
     }
-  }, [code, connected, router, game])
+  }, [gameCode, connected, router, game, didLoadAttempted])
+
+  useEffect(() => {
+    if (!socket || !connected || !gameCode || !game || loadError || isSubscribed) return
+
+    console.log('Subscribing to game:', gameCode)
+    socket.emit('subscribe-to-game', gameCode)
+    setIsSubscribed(true)
+  }, [connected, gameCode, game, loadError, isSubscribed])
 
   useEffect(() => {
     if (game?.status) {
@@ -104,25 +119,14 @@ export default function HostPage() {
     }
   }, [game?.status])
 
-  const leaderName = game?.players.find(p => p.leader)?.name
-  const latestBarredId = game?.rounds[game.currentRound]?.barred?.slice(-1)[0]
-  const latestBarredName = latestBarredId
-    ? game?.players.find(p => p.id === latestBarredId)?.name
-    : null
-  const hostMessage = content?.hostMessage
-    ? content.hostMessage
-        .replace('{LEADER_NAME}', leaderName || 'TBD')
-        .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
-    : 'Waiting...'
-
   const handleEndGame = async () => {
-    if (!code) return
+    if (!gameCode) return
     
     const confirmed = confirm('Are you sure you want to end this game?')
     if (!confirmed) return
 
     try {
-      const res = await fetch(`/api/game/${code}/delete`, {
+      const res = await fetch(`/api/game/${gameCode}/delete`, {
         method: 'DELETE'
       })
       if (!res.ok) {
@@ -136,9 +140,25 @@ export default function HostPage() {
     }
   }
 
-  if (!code) return <div style={{ padding: 24 }}>Loading...</div>
+  if (!gameCode) return <div style={{ padding: 24 }}>Loading...</div>
 
-  if (!game) return <div style={{ padding: 24 }}>Loading game...</div>
+  const isLoading = !game
+  const players = game?.players ?? []
+  const leaderName = players.find(p => p.leader)?.name
+  const currentRound = game?.currentRound ?? 0
+  const latestBarredId = game?.rounds?.[currentRound]?.barred?.slice(-1)[0]
+  const latestBarredName = latestBarredId
+    ? players.find(p => p.id === latestBarredId)?.name
+    : null
+  const hostMessage = loadError
+    ? loadError
+    : content?.hostMessage
+      ? content.hostMessage
+          .replace('{LEADER_NAME}', leaderName || 'TBD')
+          .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
+      : isLoading
+        ? 'Loading...'
+        : 'Waiting...'
 
   return (
     <div style={{
@@ -172,6 +192,11 @@ export default function HostPage() {
           <p style={{ textAlign: 'center', fontSize: '1.2em', maxWidth: '80%' }}>
             {hostMessage}
           </p>
+          {loadError ? (
+            <p style={{ textAlign: 'center', color: '#E03E3E', marginTop: 12 }}>
+              Please refresh or check the game code.
+            </p>
+          ) : null}
         </div>
 
         {/* Right Half - Players */}
@@ -196,12 +221,12 @@ export default function HostPage() {
               maxWidth: 400
             }}
           >
-            {game.players.length === 0 ? (
+            {players.length === 0 ? (
               <p style={{ textAlign: 'center', color: '#5A5A5A' }}>
                 No players have joined yet
               </p>
             ) : (
-              game.players.map((player, i) => (
+              players.map((player, i) => (
                 <div
                   key={player.id}
                   style={{
@@ -214,7 +239,7 @@ export default function HostPage() {
                   }}
                 >
                   {player.name}
-                  {game.status === 'results' && ` (${player.votes} pts)`}
+                  {game?.status === 'results' && ` (${player.votes} pts)`}
                   {player.isAdmin && ' (Admin)'}
                 </div>
               ))
@@ -222,27 +247,52 @@ export default function HostPage() {
           </div>
         </div>
       </div>
-      <div style={{
-        position: 'absolute',
-        bottom: 16,
-        left: 0,
-        right: 0,
-        textAlign: 'center',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 16
-      }}>
-        <span style={{ fontSize: 18, color: '#5A5A5A' }}>
-          <strong>Code: {code}</strong>
-        </span>
-        <span style={{ color: '#5A5A5A' }}>|</span>
-        <Button onClick={handleEndGame}>End Game</Button>
-        <span style={{ color: '#5A5A5A' }}>|</span>
-        <span style={{ fontSize: 18, color: '#5A5A5A' }}>
-          Status: {game.status} {connected ? '🟢' : '🔴'}
-        </span>
-      </div>
+      {game?.status ? (
+        <div style={{
+          position: 'absolute',
+          bottom: 16,
+          left: 0,
+          right: 0,
+          textAlign: 'center',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: 16
+        }}>
+          <span style={{ fontSize: 18, color: '#5A5A5A' }}>
+            <strong>Code: {code}</strong>
+          </span>
+          <span style={{ color: '#5A5A5A' }}>|</span>
+          <Button onClick={handleEndGame}>End Game</Button>
+          <span style={{ color: '#5A5A5A' }}>|</span>
+          <span style={{ fontSize: 18, color: '#5A5A5A' }}>
+            Status: {game.status} {connected ? '🟢' : '🔴'}
+          </span>
+        </div>
+      ) : (
+        <div style={{
+          position: 'absolute',
+          bottom: 16,
+          left: 0,
+          right: 0,
+          textAlign: 'center',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: 16
+        }}>
+          <span style={{ fontSize: 18, color: '#5A5A5A', animation: 'pulse 1.5s ease-in-out infinite' }}>
+            Loading...
+          </span>
+        </div>
+      )}
+      <style jsx>{`
+        @keyframes pulse {
+          0% { opacity: 1; }
+          50% { opacity: 0.35; }
+          100% { opacity: 1; }
+        }
+      `}</style>
     </div>
   )
 }
