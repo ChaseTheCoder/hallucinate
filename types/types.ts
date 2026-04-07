@@ -17,7 +17,7 @@ export interface GameRound {
   roundStartTime: number // timestamp
 }
 
-export type StatusTypes = 'join' | 'rules' | 'campaign' | 'vote' | 'results' | 'decision' | 'announcement' | 'final' | 'complete'
+export type StatusTypes = 'join' | 'rules' | 'campaign' | 'vote' | 'results' | 'decision' | 'announcement' | 'final'
 
 export interface Game {
   id: string // UUID

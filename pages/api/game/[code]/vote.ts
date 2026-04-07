@@ -17,7 +17,7 @@ interface NextApiResponseWithSocket extends NextApiResponse {
 
 interface VoteSubmission {
   voterId: string      // Player ID of the voter
-  votes: string[]      // Array of 3 player IDs [5pts, 3pts, 1pt]
+  votes: string[]      // Array of player IDs (1-3)
 }
 
 const VOTE_POINTS = [5, 3, 1] // Points for each position
@@ -28,8 +28,8 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const { voterId, votes } = req.body as VoteSubmission
 
     // Validation
-    if (!voterId || !votes || !Array.isArray(votes) || votes.length !== 3) {
-      return res.status(400).json({ error: 'Invalid vote submission. Must provide voterId and array of 3 player IDs' })
+    if (!voterId || !votes || !Array.isArray(votes) || votes.length < 1 || votes.length > 3) {
+      return res.status(400).json({ error: 'Invalid vote submission. Must provide voterId and array of 1-3 player IDs' })
     }
 
     // Find game
@@ -41,7 +41,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const game = games[gameId]
 
     // Check game status
-    if (game.status !== 'vote') {
+    if (game.status !== 'vote' && game.status !== 'final') {
       return res.status(400).json({ error: 'Voting is not currently active' })
     }
 
@@ -58,9 +58,6 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
     // Validate that all three votes are for different players
     const uniqueVotes = new Set(votes)
-    if (uniqueVotes.size !== 3) {
-      return res.status(400).json({ error: 'Must vote for three different players' })
-    }
 
     // Validate that voter didn't vote for themselves
     if (votes.includes(voterId)) {
@@ -109,17 +106,25 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const resWithSocket = res as NextApiResponseWithSocket
 
     if (allVotesIn) {
-      // Transition to results and compute leader once all votes are in
-      game.status = 'results'
+      // Transition to results or complete and compute leader/winner once all votes are in
       const qualifiedPlayers = game.players.filter(p => p.isQualified)
       const sortedPlayers = [...qualifiedPlayers].sort((a, b) => b.votes - a.votes)
       const newLeader = sortedPlayers[0]
 
-      if (newLeader) {
-        game.players.forEach(p => p.leader = false)
-        newLeader.leader = true
-        if (game.rounds[game.currentRound]) {
-          game.rounds[game.currentRound].leader = newLeader.id
+      if (qualifiedPlayers.length <= 2) {
+        // Final election - determine winner
+        game.status = 'final'
+        if (newLeader) {
+          game.winner = newLeader.id
+        }
+      } else {
+        game.status = 'results'
+        if (newLeader) {
+          game.players.forEach(p => p.leader = false)
+          newLeader.leader = true
+          if (game.rounds[game.currentRound]) {
+            game.rounds[game.currentRound].leader = newLeader.id
+          }
         }
       }
 
@@ -132,22 +137,36 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', {
           players: game.players,
           status: game.status,
-          barredPlayerName
+          barredPlayerName,
+          electionCycleStartTime: game.electionCycleStartTime,
+          cycleTime: game.cycleTime,
+          winner: game.winner
         })
 
-        resWithSocket.socket.server.io.to(`game-${code}`).emit('election-results', {
-          leader: newLeader ? {
-            id: newLeader.id,
-            name: newLeader.name,
-            votes: newLeader.votes
-          } : null,
-          standings: sortedPlayers.map(p => ({
-            id: p.id,
-            name: p.name,
-            votes: p.votes,
-            isLeader: p.id === newLeader?.id
-          }))
-        })
+        if (game.status === 'final') {
+          // Emit winner info for final election
+          resWithSocket.socket.server.io.to(`game-${code}`).emit('game-complete', {
+            winner: newLeader ? {
+              id: newLeader.id,
+              name: newLeader.name,
+              votes: newLeader.votes
+            } : null
+          })
+        } else {
+          resWithSocket.socket.server.io.to(`game-${code}`).emit('election-results', {
+            leader: newLeader ? {
+              id: newLeader.id,
+              name: newLeader.name,
+              votes: newLeader.votes
+            } : null,
+            standings: sortedPlayers.map(p => ({
+              id: p.id,
+              name: p.name,
+              votes: p.votes,
+              isLeader: p.id === newLeader?.id
+            }))
+          })
+        }
       }
     } else if (resWithSocket.socket?.server?.io) {
       // Broadcast voting progress only (NO results or leader info)

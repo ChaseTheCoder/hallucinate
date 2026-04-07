@@ -28,11 +28,17 @@ export default function VotePanel({
   const [votes, setVotes] = useState<VoteSelection>({})
   const [error, setError] = useState<string | null>(null)
 
+  if (!currentPlayer || !qualifiedPlayers) {
+    return <div>Loading...</div>
+  }
+
   // Filter out current player from voting options
   const availablePlayers = useMemo(
     () => qualifiedPlayers.filter(p => p.id !== currentPlayer.id),
     [qualifiedPlayers, currentPlayer.id]
   )
+
+  const requiredVotes = Math.min(3, availablePlayers.length)
 
   // Determine which position a player occupies in votes
   const getVotePosition = (playerId: string): keyof VoteSelection | null => {
@@ -62,12 +68,14 @@ export default function VotePanel({
       return
     }
 
-    // If all positions filled, replace the lowest value (third)
-    if (Object.keys(votes).length === 3) {
-      setVotes(prev => ({
-        ...prev,
-        third: playerId
-      }))
+    // If all positions filled, replace the lowest value (third) if requiredVotes === 3, else don't allow
+    if (Object.keys(votes).length === requiredVotes) {
+      if (requiredVotes === 3) {
+        setVotes(prev => ({
+          ...prev,
+          third: playerId
+        }))
+      }
       return
     }
 
@@ -82,12 +90,7 @@ export default function VotePanel({
   }
 
   const handleSubmitVote = async () => {
-    if (Object.keys(votes).length !== 3) {
-      setError('Must select three players')
-      return
-    }
-
-    const votesArray = [votes.first!, votes.second!, votes.third!]
+    const votesArray = [votes.first, votes.second, votes.third].filter(Boolean) as string[]
 
     try {
       setError(null)
@@ -98,7 +101,7 @@ export default function VotePanel({
     }
   }
 
-  const isVoteComplete = Object.keys(votes).length === 3
+  const isVoteComplete = Object.keys(votes).length === requiredVotes
   const selectedCount = Object.keys(votes).length
 
   return (
@@ -115,10 +118,10 @@ export default function VotePanel({
       <div style={{ textAlign: 'center' }}>
         <h2 style={{ color: '#5A5A5A', margin: '0 0 8px 0' }}>Cast Your Votes</h2>
         <p style={{ color: '#999', margin: 0, fontSize: '0.9em' }}>
-          Select your top 3 candidates (5, 3, 1 points)
+          Select your top {requiredVotes} candidate{requiredVotes > 1 ? 's' : ''} ({requiredVotes === 3 ? '5, 3, 1' : requiredVotes === 2 ? '5, 3' : '5'} points)
         </p>
         <p style={{ color: '#5A5A5A', margin: '8px 0 0 0', fontWeight: 'bold' }}>
-          {selectedCount}/3 Selected
+          {selectedCount}/{requiredVotes} Selected
         </p>
       </div>
 

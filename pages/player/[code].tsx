@@ -11,6 +11,7 @@ let socket: Socket | null = null
 export default function PlayerPage() {
   const router = useRouter()
   const { code, name } = router.query
+  const gameCode = Array.isArray(code) ? code[0] : code
   const [loading, setLoading] = useState(true)
   const [gameStatus, setGameStatus] = useState<string | null>(null)
   const [playerMessage, setPlayerMessage] = useState<string | null>(null)
@@ -19,16 +20,21 @@ export default function PlayerPage() {
   const [allPlayers, setAllPlayers] = useState<Player[]>([])
   const [hasVoted, setHasVoted] = useState(false)
   const [isSubmittingVote, setIsSubmittingVote] = useState(false)
-  const [barredPlayerName, setBarredPlayerName] = useState<string | null>(null)
   const [decisionSelection, setDecisionSelection] = useState<string | null>(null)
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false)
+  const [cycleTimeInput, setCycleTimeInput] = useState<string>('10')
+  const [cycleTimeSet, setCycleTimeSet] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState<string>('')
+  const [electionCycleStartTime, setElectionCycleStartTime] = useState<number>(0)
+  const [cycleTime, setCycleTime] = useState<number>(10)
+  const [winnerId, setWinnerId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!code) return
+    if (!gameCode) return
 
     // Verify the game exists
-    fetch(`/api/game/${code}`)
+    fetch(`/api/game/${gameCode}`)
       .then(res => {
         setGameExists(res.ok)
         setLoading(false)
@@ -37,26 +43,31 @@ export default function PlayerPage() {
         setGameExists(false)
         setLoading(false)
       })
-  }, [code])
+  }, [gameCode])
 
   useEffect(() => {
-    if (!code || !name) return
+    if (!gameCode || !name) return
 
     if (!socket) {
       socket = io()
     }
 
     // Single subscription for game state
-    socket.emit('subscribe-to-game', code)
+    socket.emit('subscribe-to-game', gameCode)
 
     // Subscribe to player-specific updates
-    socket.emit('subscribe-to-player', { code, playerName: name })
+    socket.emit('subscribe-to-player', { code: gameCode, playerName: name })
 
     // Listen for game state updates
-    socket.on('game-state-update', (data: { players: Player[], status: string, barredPlayerName?: string | null }) => {
+    socket.on('game-state-update', (data: { players: Player[], status: string, barredPlayerName?: string | null, electionCycleStartTime?: number, cycleTime?: number }) => {
       setGameStatus(data.status)
       setAllPlayers(data.players)
-      setBarredPlayerName(data.barredPlayerName ?? null)
+      if (data.electionCycleStartTime !== undefined) {
+        setElectionCycleStartTime(data.electionCycleStartTime)
+      }
+      if (data.cycleTime !== undefined) {
+        setCycleTime(data.cycleTime)
+      }
       
       // Update current player info
       const updatedCurrentPlayer = data.players.find(p => p.name === name)
@@ -85,7 +96,7 @@ export default function PlayerPage() {
         socket.off('game-deleted')
       }
     }
-  }, [code, name])
+  }, [gameCode, name])
 
   useEffect(() => {
     if (!gameStatus) return
@@ -95,22 +106,18 @@ export default function PlayerPage() {
       return
     }
 
-    if (gameStatus === 'announcement') {
-      const message = gameContent.announcement.hostMessage.replace(
-        '{PLAYER_NAME}',
-        barredPlayerName || 'TBD'
-      )
-      setPlayerMessage(message)
-      return
-    }
-
     if (gameStatus === 'decision' && currentPlayer?.leader) {
       setPlayerMessage(gameContent.decision.leaderMessage || null)
       return
     }
 
-    setPlayerMessage(gameContent[gameStatus]?.playerMessage || null)
-  }, [gameStatus, hasVoted, currentPlayer?.leader, barredPlayerName])
+    let message = gameContent[gameStatus]?.playerMessage || null
+    if (gameStatus === 'campaign' && timeRemaining) {
+      message = `${message} Time remaining: ${timeRemaining}`
+    }
+
+    setPlayerMessage(message)
+  }, [gameStatus, hasVoted, currentPlayer?.leader, timeRemaining])
 
   useEffect(() => {
     if (gameStatus !== 'decision') {
@@ -119,12 +126,32 @@ export default function PlayerPage() {
     }
   }, [gameStatus])
 
+  // Countdown timer for campaign
+  useEffect(() => {
+    if (gameStatus !== 'campaign' || electionCycleStartTime === 0) {
+      setTimeRemaining('')
+      return
+    }
+
+    const updateTime = () => {
+      const elapsed = Math.floor((Date.now() - electionCycleStartTime) / 1000)
+      const remaining = Math.max(0, cycleTime - elapsed)
+      const minutes = Math.floor(remaining / 60)
+      const seconds = remaining % 60
+      setTimeRemaining(`${minutes}:${seconds.toString().padStart(2, '0')}`)
+    }
+
+    updateTime()
+    const interval = setInterval(updateTime, 1000)
+    return () => clearInterval(interval)
+  }, [gameStatus, electionCycleStartTime, cycleTime])
+
   const handleSubmitVote = async (votes: string[]) => {
-    if (!code || !currentPlayer) return
+    if (!gameCode || !currentPlayer) return
 
     setIsSubmittingVote(true)
     try {
-      const res = await fetch(`/api/game/${code}/vote`, {
+      const res = await fetch(`/api/game/${gameCode}/vote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -148,7 +175,7 @@ export default function PlayerPage() {
   }
 
   const handleSubmitDecision = async () => {
-    if (!code || !currentPlayer) return
+    if (!gameCode || !currentPlayer) return
 
     if (!decisionSelection) {
       setDecisionError('Select a player to bar from election')
@@ -157,7 +184,7 @@ export default function PlayerPage() {
 
     setIsSubmittingDecision(true)
     try {
-      const res = await fetch(`/api/game/${code}/decision`, {
+      const res = await fetch(`/api/game/${gameCode}/decision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -183,8 +210,8 @@ export default function PlayerPage() {
 
   async function handleLeaveGame() {
     // Remove player from game
-    if (code && name) {
-      await fetch(`/api/game/${code}/leave`, {
+    if (gameCode && name) {
+      await fetch(`/api/game/${gameCode}/leave`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name })
@@ -195,11 +222,44 @@ export default function PlayerPage() {
     router.push('/')
   }
 
-  const handleStartGameClick = async () => {
-    if (!code) return
+  async function handleEndGame() {
+    if (!gameCode) return
+
     try {
-      const res = await fetch(`/api/game/${code}/update`, {
-        method: 'PATCH'
+      const res = await fetch(`/api/game/${gameCode}/delete`, {
+        method: 'DELETE'
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || `Failed to end game (${res.status})`)
+      }
+      console.log('Game ended successfully')
+      // Clear stored player info and redirect
+      localStorage.removeItem('currentPlayer')
+      router.push('/')
+    } catch (error) {
+      console.error('Error ending game:', error)
+      alert('Failed to end game')
+    }
+  }
+
+  const handleStartGameClick = async () => {
+    if (!gameCode) return
+    try {
+      const body: any = {}
+      if (gameStatus === 'join') {
+        const seconds = parseInt(cycleTimeInput)
+        if (isNaN(seconds) || seconds < 5 || seconds > 60) {
+          alert('Please enter a valid number of seconds (5-60)')
+          return
+        }
+        body.cycleTime = seconds
+        setCycleTimeSet(true)
+      }
+      const res = await fetch(`/api/game/${gameCode}/update`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined
       })
       if (!res.ok) {
         const data = await res.json().catch(() => null)
@@ -239,6 +299,16 @@ export default function PlayerPage() {
   const isLeader = currentPlayer?.leader || false
   const qualifiedPlayers = allPlayers.filter(p => p.isQualified)
   const decisionCandidates = qualifiedPlayers.filter(p => !p.leader)
+
+  const getWinnerInfo = (winnerId: string | null) => {
+    const winner = allPlayers.find(p => p.id === winnerId)
+    return {
+      winner,
+      winnerName: winner?.name || 'TBD',
+      winnerPoints: winner?.votes || 0,
+      loserPoints: allPlayers.filter(p => p.isQualified && p.id !== winnerId).reduce((max, p) => Math.max(max, p.votes), 0)
+    }
+  }
 
   return (
     <div
@@ -306,7 +376,7 @@ export default function PlayerPage() {
             qualifiedPlayers={qualifiedPlayers}
             onVoteSubmit={handleSubmitVote}
             isSubmitting={isSubmittingVote}
-            code={code as string}
+            code={gameCode as string}
           />
         ) : gameStatus === 'decision' && isLeader ? (
           <div
@@ -411,7 +481,67 @@ export default function PlayerPage() {
             <p style={{ color: '#5A5A5A', textAlign: 'center', margin: 0 }}>
               {playerMessage || 'null...'}
             </p>
-            {isAdmin && (
+            {isAdmin && gameStatus === 'join' && !cycleTimeSet && (
+              <>
+                <p
+                  style={{
+                    color: '#5A5A5A',
+                    textAlign: 'center',
+                    marginTop: 12
+                  }}
+                >
+                  Set campaign time per round (seconds):
+                </p>
+                <input
+                  type="number"
+                  min="5"
+                  max="60"
+                  value={cycleTimeInput}
+                  onChange={(e) => setCycleTimeInput(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: '1em',
+                    border: '1px solid #5A5A5A',
+                    borderRadius: 4,
+                    textAlign: 'center',
+                    width: '100px'
+                  }}
+                />
+                <Button 
+                  onClick={handleStartGameClick} 
+                  disabled={allPlayers.length < 4}
+                  style={{ marginTop: 12 }}
+                >
+                  Start Game
+                </Button>
+                {allPlayers.length < 4 && (
+                  <p style={{ 
+                    color: '#E03E3E', 
+                    textAlign: 'center', 
+                    marginTop: 8, 
+                    fontSize: '0.9em' 
+                  }}>
+                    Need at least 4 players to start ({allPlayers.length}/4)
+                  </p>
+                )}
+              </>
+            )}
+            {isAdmin && gameStatus === 'final' && (
+              <>
+                <p
+                  style={{
+                    color: '#5A5A5A',
+                    textAlign: 'center',
+                    marginTop: 12,
+                    paddingTop: 36
+                  }}
+                >
+                  Game complete! End the game when ready.
+                </p>
+                <Button onClick={handleEndGame}>End Game</Button>
+              </>
+            )}
+            {isAdmin && (gameStatus !== 'join' || cycleTimeSet) && gameStatus !== 'campaign' && gameStatus !== 'final' && (
               <>
                 <p
                   style={{

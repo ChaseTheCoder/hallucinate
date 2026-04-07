@@ -76,7 +76,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', {
       players: game.players,
       status: game.status,
-      barredPlayerName: barredPlayer.name
+      barredPlayerName: barredPlayer.name,
+      electionCycleStartTime: game.electionCycleStartTime,
+      cycleTime: game.cycleTime
     })
   }
 

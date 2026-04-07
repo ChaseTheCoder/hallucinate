@@ -40,7 +40,8 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       leader: false,
       isQualified: true,
       roundsBarred: 0,
-      isAdmin: false
+      isAdmin: false,
+      hasVoted: false
     }
 
     if(game.players.find(p => p.name === name)) {

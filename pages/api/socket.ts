@@ -49,7 +49,10 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
         socket.emit('game-state-update', {
           players: game.players,
           status: game.status,
-          barredPlayerName
+          barredPlayerName,
+          electionCycleStartTime: game.electionCycleStartTime,
+          cycleTime: game.cycleTime,
+          winner: game.winner
         })
       })
 

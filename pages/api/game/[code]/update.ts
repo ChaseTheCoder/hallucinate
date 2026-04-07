@@ -19,6 +19,7 @@ interface NextApiResponseWithSocket extends NextApiResponse {
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'PATCH') {
     const { code } = req.query
+    const { cycleTime } = req.body
 
     const game = Object.values(games).find(g => g.code === code as string)
     if (!game) {
@@ -28,31 +29,51 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const currentStatus = game.status
     let newStatus: StatusTypes | null = null
 
+    // Auto-transition if timer expired
+    if (currentStatus === 'campaign' && game.electionCycleStartTime > 0) {
+      const elapsed = Date.now() - game.electionCycleStartTime
+      if (elapsed >= game.cycleTime * 1000) {
+        newStatus = 'vote'
+        console.log(`Campaign timer expired, auto-transitioning to vote`)
+      }
+    }
+
     // Count qualified players
     const qualifiedPlayerCount = game.players.filter(p => p.isQualified).length
 
-    // State transitions
-    if (currentStatus === 'join' && game.players.length >= 4) {
-      newStatus = 'rules'
-      // Qualify all players at start for testing
-      game.players.forEach(p => p.isQualified = true)
-    } else if (currentStatus === 'rules') {
-      newStatus = 'campaign'
-    } else if (currentStatus === 'campaign') {
-      newStatus = 'vote'
-    } else if (currentStatus === 'vote') {
-      newStatus = 'results'
-    } else if (currentStatus === 'results') {
-      // Check if exactly 2 players are qualified
-      if (qualifiedPlayerCount === 2) {
-        newStatus = 'final'
-      } else {
+    if (!newStatus) {
+
+      // State transitions
+      if (currentStatus === 'join' && game.players.length >= 4) {
+        newStatus = 'rules'
+        // Set cycle time if provided (in seconds)
+        if (cycleTime && typeof cycleTime === 'number') {
+          game.cycleTime = Math.min(60, Math.max(5, cycleTime)) // clamp seconds to 5-60
+        }
+        // Qualify all players at start for testing
+        game.players.forEach(p => p.isQualified = true)
+      } else if (currentStatus === 'rules') {
+        newStatus = 'campaign'
+      } else if (currentStatus === 'campaign') {
+        newStatus = 'vote'
+      } else if (currentStatus === 'vote') {
+        if (qualifiedPlayerCount === 2) {
+          newStatus = 'final' // Final announcement after final vote
+        } else {
+          newStatus = 'results'
+        }
+      } else if (currentStatus === 'results') {
         newStatus = 'decision'
+      } else if (currentStatus === 'decision') {
+        newStatus = 'announcement'
+      } else if (currentStatus === 'announcement') {
+        newStatus = 'campaign'
+        game.players.forEach(p => {
+          p.hasVoted = false
+          p.votes = 0
+        })
+        game.currentRound += 1
       }
-    } else if (currentStatus === 'decision') {
-      newStatus = 'announcement'
-    } else if (currentStatus === 'announcement') {
-      newStatus = 'campaign'
     }
 
     if (!newStatus) {
@@ -72,13 +93,36 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       ? game.players.find(p => p.id === latestBarredId)?.name
       : null
 
+    // Set start time for campaign
+    if (newStatus === 'campaign') {
+      game.electionCycleStartTime = Date.now()
+      // Use 5 seconds for final round (when only 2 qualified players remain)
+      const campaignTime = qualifiedPlayerCount === 2 ? 5 : game.cycleTime
+      console.log(`Campaign timer started for round ${game.currentRound}, time: ${campaignTime}s${qualifiedPlayerCount === 2 ? ' (final round)' : ''}`)
+      
+      // Broadcast the campaign time for this specific round
+      const resWithSocket = res as NextApiResponseWithSocket
+      if (resWithSocket.socket?.server?.io) {
+        resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', {
+          players: game.players,
+          status: newStatus,
+          barredPlayerName,
+          electionCycleStartTime: game.electionCycleStartTime,
+          cycleTime: campaignTime // Send the actual time for this campaign
+        })
+      }
+      return res.status(200).json({ success: true, status: newStatus })
+    }
+
     // Broadcast complete game state to unified room (one emission)
     const resWithSocket = res as NextApiResponseWithSocket
     if (resWithSocket.socket?.server?.io) {
       resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', {
         players: game.players,
         status: newStatus,
-        barredPlayerName
+        barredPlayerName,
+        electionCycleStartTime: game.electionCycleStartTime,
+        cycleTime: game.cycleTime
       })
     }
 
