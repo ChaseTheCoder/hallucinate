@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { games } from '../../../../server/gameStore'
+import { games, enrichGame } from '../../../../server/gameStore'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 
@@ -73,13 +73,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
   const resWithSocket = res as NextApiResponseWithSocket
   if (resWithSocket.socket?.server?.io) {
-    resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', {
-      players: game.players,
-      status: game.status,
-      barredPlayerName: barredPlayer.name,
-      electionCycleStartTime: game.electionCycleStartTime,
-      cycleTime: game.cycleTime
-    })
+    resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
   }
 
   res.status(200).json({

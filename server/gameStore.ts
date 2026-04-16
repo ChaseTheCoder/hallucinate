@@ -29,8 +29,21 @@ export function createGame(): Game {
     currentRound: 0,
     electionCycleStartTime: 0,
     winner: undefined,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    adminPlayerId: undefined,
   }
   games[id] = game
   return game
+}
+
+/**
+ * Enrich a game object with computed fields for efficient client rendering
+ * Adds: adminPlayerId, currentBarredPlayerIds
+ */
+export function enrichGame(game: Game): Game {
+  return {
+    ...game,
+    adminPlayerId: game.players.find(p => p.isAdmin)?.id ?? undefined,
+    currentBarredPlayerIds: game.rounds[game.currentRound]?.barred ?? []
+  }
 }

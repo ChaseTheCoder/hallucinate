@@ -17,121 +17,239 @@ export default function HostPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [didLoadAttempted, setDidLoadAttempted] = useState(false)
   const [connected, setConnected] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>('disconnected')
+  const [socketError, setSocketError] = useState<string | null>(null)
   const [isSubscribed, setIsSubscribed] = useState(false)
-  const listenersSetupRef = useRef(false)
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0)
   const hasTransitionedRef = useRef(false)
   const [messageIndex, setMessageIndex] = useState(0)
   const [barredPlayerName, setBarredPlayerName] = useState<string | null>(null)
+  const [players, setPlayers] = useState<Game['players']>([])
+  const [leaderName, setLeaderName] = useState<string>('TBD')
+  const [currentRound, setCurrentRound] = useState<number>(0)
+  const [timeRemaining, setTimeRemaining] = useState<string>('')
+  const [qualifiedPlayers, setQualifiedPlayers] = useState<Game['players']>([])
+  const [sortedBarredPlayers, setSortedBarredPlayers] = useState<Game['players']>([])
+  const [voteProgress, setVoteProgress] = useState<string | null>(null)
+  const [winnerName, setWinnerName] = useState<string>('TBD')
+  const [winnerPoints, setWinnerPoints] = useState<number>(0)
+  const [loserPoints, setLoserPoints] = useState<number>(0)
+  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [latestBarredName, setLatestBarredName] = useState<string | null>(null)
+  const [currentHostMessage, setCurrentHostMessage] = useState<string>('Loading...')
 
+  // socket connection and game state management
   useEffect(() => {
     if (!gameCode) return
 
-    // Initialize socket connection once
     if (!socket) {
       socket = io()
-
-      socket.on('connect', () => {
-        console.log('Socket connected')
-        setConnected(true)
-      })
-
-      socket.on('disconnect', () => {
-        console.log('Socket disconnected')
-        setConnected(false)
-        setIsSubscribed(false)
-      })
-
-      socket.on('error', (message) => {
-        console.error('Socket error:', message)
-      })
     }
 
-    // Set up game-specific listeners only once
-    if (!listenersSetupRef.current) {
-      // Single listener for all game state updates
-      socket.on('game-state-update', (data: { players: any[], status: string, barredPlayerName?: string | null, electionCycleStartTime?: number, cycleTime?: number, winner?: string }) => {
-        console.log('Game state update received:', data)
-        setGame(prev => {
-          if (!prev) return null
-          return {
-            ...prev,
-            players: data.players,
-            status: data.status as any,
-            electionCycleStartTime: data.electionCycleStartTime ?? prev.electionCycleStartTime,
-            cycleTime: data.cycleTime ?? prev.cycleTime,
-            winner: data.winner ?? prev.winner
-          }
-        })
-        setBarredPlayerName(data.barredPlayerName ?? null)
-      })
+    const handleConnect = () => {
+      console.log('Socket connected')
+      setConnected(true)
+      setConnectionStatus('connected')
+      setSocketError(null)
 
-      // Listen for game complete
-      socket.on('game-complete', (data: { winner: { id: string, name: string, votes: number } | null }) => {
-        console.log('Game complete:', data)
-        setGame(prev => {
-          if (!prev) return null
-          return {
-            ...prev,
-            winner: data.winner?.id || prev.winner
-          }
-        })
-      })
-
-      // Listen for game deletion
-      socket.on('game-deleted', () => {
-        console.log('Game deleted')
-        socket?.disconnect()
-        socket = null
-        router.push('/')
-      })
-
-      listenersSetupRef.current = true
+      // Re-subscribe on every successful connect (initial + reconnect)
+      socket?.emit('subscribe-to-game', gameCode)
+      setIsSubscribed(true)
     }
 
-    // Fetch initial game state
-    if (!game && gameCode && !didLoadAttempted) {
-      setDidLoadAttempted(true)
-      setLoadError(null)
-      fetch(`/api/game/${gameCode}`, { cache: 'no-store' })
-        .then(res => {
-          if (!res.ok) {
-            const message = res.status === 404
-              ? 'Game not found'
-              : 'Failed to load game'
-            throw new Error(message)
-          }
-          return res.json()
-        })
-        .then(data => {
-          console.log('Fetched initial game data:', data)
-          setLoadError(null)
-          setGame(data)
-        })
-        .catch(err => {
-          console.error('Error fetching game:', err)
-          setLoadError(err instanceof Error ? err.message : 'Unable to fetch game')
-        })
+    const handleDisconnect = () => {
+      console.log('Socket disconnected')
+      setConnected(false)
+      setConnectionStatus(socket?.active ? 'reconnecting' : 'disconnected')
+      setIsSubscribed(false)
     }
 
-    // Cleanup only on unmount
-    return () => {
-      if (socket && listenersSetupRef.current) {
-        socket.off('game-state-update')
-        socket.off('game-deleted')
-        listenersSetupRef.current = false
+    const handleConnectError = (error: Error) => {
+      console.error('Socket connect_error:', error)
+      setSocketError(error?.message || 'Connection error')
+      setConnectionStatus(socket?.active ? 'reconnecting' : 'disconnected')
+    }
+
+    const handleError = (message: unknown) => {
+      console.error('Socket error:', message)
+      setSocketError(typeof message === 'string' ? message : 'Socket error')
+    }
+
+    const handleGameStateUpdate = (data: Game) => {
+      console.log('Game state update received:', data)
+      setGame(data)
+
+      if (data.currentBarredPlayerIds && data.currentBarredPlayerIds.length > 0) {
+        const latestBarredId = data.currentBarredPlayerIds[data.currentBarredPlayerIds.length - 1]
+        const barredPlayer = data.players.find(p => p.id === latestBarredId)
+        setBarredPlayerName(barredPlayer?.name ?? null)
+      } else {
+        setBarredPlayerName(null)
       }
     }
-  }, [gameCode, connected, router, game, didLoadAttempted])
+
+    const handleGameComplete = (data: { winner: { id: string, name: string, votes: number } | null }) => {
+      console.log('Game complete:', data)
+      setGame(prev => {
+        if (!prev) return null
+        return {
+          ...prev,
+          winner: data.winner?.id || prev.winner
+        }
+      })
+    }
+
+    const handleGameDeleted = () => {
+      console.log('Game deleted')
+      socket?.disconnect()
+      socket = null
+      router.push('/')
+    }
+
+    socket.on('connect', handleConnect)
+    socket.on('disconnect', handleDisconnect)
+    socket.on('connect_error', handleConnectError)
+    socket.on('error', handleError)
+    socket.on('game-state-update', handleGameStateUpdate)
+    socket.on('game-complete', handleGameComplete)
+    socket.on('game-deleted', handleGameDeleted)
+
+    if (socket.connected) {
+      handleConnect()
+    }
+
+    return () => {
+      if (!socket) return
+      socket.off('connect', handleConnect)
+      socket.off('disconnect', handleDisconnect)
+      socket.off('connect_error', handleConnectError)
+      socket.off('error', handleError)
+      socket.off('game-state-update', handleGameStateUpdate)
+      socket.off('game-complete', handleGameComplete)
+      socket.off('game-deleted', handleGameDeleted)
+    }
+  }, [gameCode, router])
+
+  // Fetch initial game state once; socket keeps it live afterward.
+  useEffect(() => {
+    if (!gameCode || game || didLoadAttempted) return
+
+    setDidLoadAttempted(true)
+    setLoadError(null)
+    fetch(`/api/game/${gameCode}`, { cache: 'no-store' })
+      .then(res => {
+        if (!res.ok) {
+          const message = res.status === 404
+            ? 'Game not found'
+            : 'Failed to load game'
+          throw new Error(message)
+        }
+        return res.json()
+      })
+      .then(data => {
+        console.log('Fetched initial game data:', data)
+        setLoadError(null)
+        setGame(data)
+      })
+      .catch(err => {
+        console.error('Error fetching game:', err)
+        const message = err instanceof Error ? err.message : 'Unable to fetch game'
+        setLoadError(message)
+        if (message !== 'Game not found') {
+          if (retryTimeoutRef.current) {
+            clearTimeout(retryTimeoutRef.current)
+          }
+          retryTimeoutRef.current = setTimeout(() => {
+            setDidLoadAttempted(false)
+          }, 10000)
+        }
+      })
+
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current)
+      }
+    }
+  }, [gameCode, game, didLoadAttempted])
+
+  // Keep display values in state so UI updates immediately from live game updates.
+  useEffect(() => {
+    const nextPlayers = game?.players ?? []
+    const nextQualifiedPlayers = nextPlayers.filter(p => p.isQualified)
+    const nextBarredPlayers = nextPlayers.filter(p => !p.isQualified)
+    const nextSortedBarredPlayers = [...nextBarredPlayers].sort((a, b) => {
+      const aRoundIndex = game?.rounds?.findIndex(round => round?.barred?.includes(a.id)) ?? -1
+      const bRoundIndex = game?.rounds?.findIndex(round => round?.barred?.includes(b.id)) ?? -1
+      if (aRoundIndex === -1 && bRoundIndex === -1) return 0
+      return bRoundIndex - aRoundIndex
+    })
+
+    const nextWinner = game?.winner ? nextPlayers.find(p => p.id === game.winner) : null
+    const nextWinnerName = nextWinner?.name || 'TBD'
+    const nextWinnerPoints = nextWinner?.votes || 0
+    const nextLoserPoints = nextPlayers
+      .filter(p => p.isQualified && p.id !== game?.winner)
+      .reduce((max, p) => Math.max(max, p.votes), 0)
+
+    const nextLeaderName = nextPlayers.find(p => p.leader)?.name || 'TBD'
+    const votedCount = nextQualifiedPlayers.filter(p => p.hasVoted).length
+    const totalQualified = nextQualifiedPlayers.length
+    const nextVoteProgress = game?.status === 'vote' ? `${votedCount}/${totalQualified}` : null
+
+    let nextTimeRemaining = ''
+    if (game?.status === 'campaign' && remainingSeconds > 0) {
+      const minutes = Math.floor(remainingSeconds / 60)
+      const seconds = remainingSeconds % 60
+      nextTimeRemaining = `${minutes}:${seconds.toString().padStart(2, '0')}`
+    }
+
+    setPlayers(nextPlayers)
+    setLeaderName(nextLeaderName)
+    setCurrentRound(game?.currentRound ?? 0)
+    setTimeRemaining(nextTimeRemaining)
+    setQualifiedPlayers(nextQualifiedPlayers)
+    setSortedBarredPlayers(nextSortedBarredPlayers)
+    setVoteProgress(nextVoteProgress)
+    setWinnerName(nextWinnerName)
+    setWinnerPoints(nextWinnerPoints)
+    setLoserPoints(nextLoserPoints)
+  }, [game, remainingSeconds])
 
   useEffect(() => {
-    if (!socket || !connected || !gameCode || !game || loadError || isSubscribed) return
+    setIsLoading(!game)
+  }, [game])
 
-    console.log('Subscribing to game:', gameCode)
-    socket.emit('subscribe-to-game', gameCode)
-    setIsSubscribed(true)
-  }, [connected, gameCode, game, loadError, isSubscribed])
+  useEffect(() => {
+    setLatestBarredName(barredPlayerName)
+  }, [barredPlayerName])
 
+  // Keep host screen resilient against TV/browser sleep/wake cycles
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log('Host screen hidden, TV likely sleeping or backgrounded')
+        return
+      }
+
+      console.log('Host screen visible again, checking socket status')
+      if (socket) {
+        if (!socket.connected) {
+          setConnectionStatus('reconnecting')
+          socket.connect()
+        }
+        if (socket.connected && gameCode && !isSubscribed) {
+          socket.emit('subscribe-to-game', gameCode)
+          setIsSubscribed(true)
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [gameCode, isSubscribed])
+
+  // Update host messages based on game status
   useEffect(() => {
     if (game?.status) {
       const gameStatus = game.status as keyof typeof gameContent
@@ -150,6 +268,43 @@ export default function HostPage() {
 
     return () => clearTimeout(timeout)
   }, [content?.hostMessage, messageIndex])
+
+  useEffect(() => {
+    let nextMessage = loadError
+      ? loadError
+      : isLoading
+        ? 'Loading...'
+        : 'Waiting...'
+
+    if (content?.hostMessage) {
+      const messageText = Array.isArray(content.hostMessage)
+        ? (content.hostMessage[messageIndex] || '')
+        : content.hostMessage
+
+      nextMessage = messageText
+        .replace('{LEADER_NAME}', leaderName || 'TBD')
+        .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
+        .replace('{TIME}', timeRemaining || 'TBD')
+        .replace('{VOTE_PROGRESS}', voteProgress || '0/0')
+        .replace('{WINNER_NAME}', winnerName)
+        .replace('{WINNER_POINTS}', winnerPoints.toString())
+        .replace('{LOSER_POINTS}', loserPoints.toString())
+    }
+
+    setCurrentHostMessage(nextMessage)
+  }, [
+    loadError,
+    isLoading,
+    content,
+    messageIndex,
+    leaderName,
+    latestBarredName,
+    timeRemaining,
+    voteProgress,
+    winnerName,
+    winnerPoints,
+    loserPoints
+  ])
 
   // Update remaining seconds for campaign timer
   useEffect(() => {
@@ -219,66 +374,6 @@ export default function HostPage() {
 
   if (!gameCode) return <div style={{ padding: 24 }}>Loading...</div>
 
-  const isLoading = !game
-  const players = game?.players ?? []
-  const leaderName = players.find(p => p.leader)?.name
-  const currentRound = game?.currentRound ?? 0
-  const latestBarredName = barredPlayerName
-
-  // Calculate time remaining for campaign
-  let timeRemaining = ''
-  if (game?.status === 'campaign' && remainingSeconds > 0) {
-    const minutes = Math.floor(remainingSeconds / 60)
-    const seconds = remainingSeconds % 60
-    timeRemaining = `${minutes}:${seconds.toString().padStart(2, '0')}`
-  }
-
-  // Separate qualified and barred players
-  const qualifiedPlayers = players.filter(p => p.isQualified)
-  const barredPlayers = players.filter(p => !p.isQualified)
-
-  // Sort barred players by most recent first (reverse chronological order)
-  const sortedBarredPlayers = barredPlayers.sort((a, b) => {
-    // Find the round where each was barred
-    const aRoundIndex = game?.rounds?.findIndex(round => round.barred.includes(a.id)) ?? -1
-    const bRoundIndex = game?.rounds?.findIndex(round => round.barred.includes(b.id)) ?? -1
-    return bRoundIndex - aRoundIndex // Most recent first
-  })
-
-  // Calculate vote progress
-  const votedCount = qualifiedPlayers.filter(p => p.hasVoted).length
-  const totalQualified = qualifiedPlayers.length
-  const voteProgress = game?.status === 'vote' ? `${votedCount}/${totalQualified}` : null
-
-  // Get winner info for complete
-  const winner = game?.winner ? players.find(p => p.id === game.winner) : null
-  const winnerName = winner?.name || 'TBD'
-  const winnerPoints = winner?.votes || 0
-  const loserPoints = players.filter(p => p.isQualified && p.id !== game?.winner).reduce((max, p) => Math.max(max, p.votes), 0)
-
-  let currentHostMessage = loadError
-    ? loadError
-    : isLoading
-      ? 'Loading...'
-      : 'Waiting...'
-
-  if (content?.hostMessage) {
-    let messageText = ''
-    if (Array.isArray(content.hostMessage)) {
-      messageText = content.hostMessage[messageIndex] || ''
-    } else {
-      messageText = content.hostMessage
-    }
-    currentHostMessage = messageText
-      .replace('{LEADER_NAME}', leaderName || 'TBD')
-      .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
-      .replace('{TIME}', timeRemaining || 'TBD')
-      .replace('{VOTE_PROGRESS}', voteProgress || '0/0')
-      .replace('{WINNER_NAME}', winnerName)
-      .replace('{WINNER_POINTS}', winnerPoints.toString())
-      .replace('{LOSER_POINTS}', loserPoints.toString())
-  }
-
   return (
     <div style={{
       minHeight: '100vh',
@@ -286,6 +381,42 @@ export default function HostPage() {
       flexDirection: 'column',
       position: 'relative'
     }}>
+      <div style={{
+        position: 'absolute',
+        top: 24,
+        right: 24,
+        zIndex: 20,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        alignItems: 'flex-end'
+      }}>
+        <div style={{
+          padding: '10px 14px',
+          borderRadius: 12,
+          backgroundColor: connectionStatus === 'connected' ? '#E6F4EA' : connectionStatus === 'reconnecting' ? '#FFF7E6' : '#FCE8E6',
+          color: connectionStatus === 'connected' ? '#1F7A35' : connectionStatus === 'reconnecting' ? '#A36F05' : '#B91C1C',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.08)',
+          fontSize: '0.9em',
+          fontWeight: 600
+        }}>
+          {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'reconnecting' ? 'Reconnecting...' : 'Disconnected'}
+        </div>
+        {socketError ? (
+          <div style={{
+            padding: '10px 14px',
+            borderRadius: 12,
+            backgroundColor: '#FBE8E8',
+            color: '#B91C1C',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.08)',
+            fontSize: '0.85em',
+            maxWidth: 320,
+            textAlign: 'right'
+          }}>
+            {socketError}
+          </div>
+        ) : null}
+      </div>
       <div
         style={{
           display: 'flex',

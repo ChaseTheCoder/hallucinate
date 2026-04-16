@@ -8,10 +8,18 @@ import { Player } from '../../types/types'
 
 let socket: Socket | null = null
 
+interface SessionData {
+  code: string
+  playerId: string
+  playerName: string
+}
+
 export default function PlayerPage() {
   const router = useRouter()
   const { code, name } = router.query
   const gameCode = Array.isArray(code) ? code[0] : code
+  const playerName = Array.isArray(name) ? name[0] : name
+
   const [loading, setLoading] = useState(true)
   const [gameStatus, setGameStatus] = useState<string | null>(null)
   const [playerMessage, setPlayerMessage] = useState<string | null>(null)
@@ -29,9 +37,21 @@ export default function PlayerPage() {
   const [electionCycleStartTime, setElectionCycleStartTime] = useState<number>(0)
   const [cycleTime, setCycleTime] = useState<number>(10)
   const [winnerId, setWinnerId] = useState<string | null>(null)
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('disconnected')
+  const [sessionData, setSessionData] = useState<SessionData | null>(null)
 
+  // Initialize session data from URL and localStorage
   useEffect(() => {
-    if (!gameCode) return
+    if (!gameCode || !playerName) return
+
+    // Try to restore session from localStorage
+    const storedSession = localStorage.getItem('playerSession')
+    const session: SessionData = storedSession && JSON.parse(storedSession).code === gameCode
+      ? JSON.parse(storedSession)
+      : { code: gameCode, playerId: '', playerName: playerName }
+
+    setSessionData(session)
+    localStorage.setItem('playerSession', JSON.stringify(session))
 
     // Verify the game exists
     fetch(`/api/game/${gameCode}`)
@@ -43,20 +63,47 @@ export default function PlayerPage() {
         setGameExists(false)
         setLoading(false)
       })
-  }, [gameCode])
+  }, [gameCode, playerName])
 
+  // Establish and maintain socket connection with mobile resilience
   useEffect(() => {
-    if (!gameCode || !name) return
+    if (!gameCode || !sessionData) return
 
     if (!socket) {
       socket = io()
     }
 
-    // Single subscription for game state
-    socket.emit('subscribe-to-game', gameCode)
+    const establishConnection = () => {
+      // Single subscription for game state
+      socket!.emit('subscribe-to-game', gameCode)
 
-    // Subscribe to player-specific updates
-    socket.emit('subscribe-to-player', { code: gameCode, playerName: name })
+      // Subscribe to player-specific updates using playerId when available
+      const playerSubscription = sessionData.playerId
+        ? { code: gameCode, playerId: sessionData.playerId }
+        : { code: gameCode, playerName: sessionData.playerName }
+      socket!.emit('subscribe-to-player', playerSubscription)
+    }
+
+    // Monitor socket connection events
+    const handleConnect = () => {
+      console.log('[Socket] Connected')
+      setConnectionStatus('connected')
+      establishConnection()
+    }
+
+    const handleDisconnect = () => {
+      console.log('[Socket] Disconnected')
+      setConnectionStatus(socket?.active ? 'reconnecting' : 'disconnected')
+    }
+
+    const handleConnectError = (error: Error) => {
+      console.error('[Socket] connect_error:', error)
+      setConnectionStatus(socket?.active ? 'reconnecting' : 'disconnected')
+    }
+
+    socket.on('connect', handleConnect)
+    socket.on('disconnect', handleDisconnect)
+    socket.on('connect_error', handleConnectError)
 
     // Listen for game state updates
     socket.on('game-state-update', (data: { players: Player[], status: string, barredPlayerName?: string | null, electionCycleStartTime?: number, cycleTime?: number }) => {
@@ -68,9 +115,9 @@ export default function PlayerPage() {
       if (data.cycleTime !== undefined) {
         setCycleTime(data.cycleTime)
       }
-      
+
       // Update current player info
-      const updatedCurrentPlayer = data.players.find(p => p.name === name)
+      const updatedCurrentPlayer = data.players.find(p => p.name === sessionData.playerName)
       if (updatedCurrentPlayer) {
         setCurrentPlayer(updatedCurrentPlayer)
         setHasVoted(updatedCurrentPlayer.hasVoted)
@@ -81,6 +128,12 @@ export default function PlayerPage() {
     socket.on('player-status-update', (player: Player) => {
       setCurrentPlayer(player)
       setHasVoted(player.hasVoted)
+      // Store player ID in session when first received
+      if (!sessionData.playerId && player.id) {
+        const updated = { ...sessionData, playerId: player.id }
+        setSessionData(updated)
+        localStorage.setItem('playerSession', JSON.stringify(updated))
+      }
     })
 
     // Listen for game deletion
@@ -88,15 +141,63 @@ export default function PlayerPage() {
       setGameExists(false)
     })
 
+    // Listen for player disconnection/reconnection events (for diagnostics)
+    socket.on('player-disconnected', (data: { playerName: string }) => {
+      if (data.playerName === sessionData.playerName) {
+        console.log('[Socket] Self disconnection detected')
+      }
+    })
+
+    socket.on('player-reconnected', (data: { playerName: string }) => {
+      if (data.playerName === sessionData.playerName) {
+        console.log('[Socket] Self reconnection detected - reestablishing subscriptions')
+        establishConnection()
+      }
+    })
+
+    // Establish connection if not already connected
+    if (socket.connected) {
+      handleConnect()
+    }
+
     // Cleanup on unmount
     return () => {
       if (socket) {
+        socket.off('connect', handleConnect)
+        socket.off('disconnect', handleDisconnect)
+        socket.off('connect_error', handleConnectError)
         socket.off('game-state-update')
         socket.off('player-status-update')
         socket.off('game-deleted')
+        socket.off('player-disconnected')
+        socket.off('player-reconnected')
       }
     }
-  }, [gameCode, name])
+  }, [gameCode, sessionData])
+
+  // Page visibility handler - critical for mobile background/foreground transitions
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log('[Visibility] Page hidden - mobile screen may have locked')
+      } else {
+        console.log('[Visibility] Page visible - reconnecting after background')
+        // Reconnect socket when page becomes visible
+        if (socket && !socket.connected) {
+          console.log('[Visibility] Socket disconnected while in background, attempting reconnect')
+          socket.connect()
+        } else if (socket && socket.connected && sessionData) {
+          // Re-establish subscriptions even if socket is already connected
+          console.log('[Visibility] Re-establishing subscriptions')
+          socket.emit('subscribe-to-game', gameCode)
+          socket.emit('subscribe-to-player', { code: gameCode, playerName: sessionData.playerName })
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [gameCode, sessionData])
 
   useEffect(() => {
     if (!gameStatus) return
@@ -210,15 +311,15 @@ export default function PlayerPage() {
 
   async function handleLeaveGame() {
     // Remove player from game
-    if (gameCode && name) {
+    if (gameCode && sessionData?.playerName) {
       await fetch(`/api/game/${gameCode}/leave`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name: sessionData.playerName })
       })
     }
-    // Clear stored player info
-    localStorage.removeItem('currentPlayer')
+    // Clear stored session info
+    localStorage.removeItem('playerSession')
     router.push('/')
   }
 
@@ -234,8 +335,8 @@ export default function PlayerPage() {
         throw new Error(data?.error || `Failed to end game (${res.status})`)
       }
       console.log('Game ended successfully')
-      // Clear stored player info and redirect
-      localStorage.removeItem('currentPlayer')
+      // Clear stored session info and redirect
+      localStorage.removeItem('playerSession')
       router.push('/')
     } catch (error) {
       console.error('Error ending game:', error)
@@ -320,6 +421,25 @@ export default function PlayerPage() {
         gap: 32
       }}
     >
+      {/* Connection Status Indicator - Mobile Resilience Feedback */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 12,
+          right: 12,
+          fontSize: '0.75em',
+          padding: '6px 10px',
+          borderRadius: 4,
+          fontWeight: 500,
+          backgroundColor: connectionStatus === 'connected' ? '#e8f5e9' : connectionStatus === 'reconnecting' ? '#fff8e1' : '#ffebee',
+          color: connectionStatus === 'connected' ? '#2e7d32' : connectionStatus === 'reconnecting' ? '#f57f17' : '#c62828',
+          zIndex: 1000
+        }}
+      >
+        <span style={{ display: 'inline-block', width: 6, height: 6, backgroundColor: 'currentColor', borderRadius: '50%', marginRight: 6 }}></span>
+        {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'reconnecting' ? 'Reconnecting...' : 'Disconnected'}
+      </div>
+
       {/* Header */}
       <div
         style={{
@@ -344,7 +464,7 @@ export default function PlayerPage() {
               color: '#5A5A5A'
             }}
           >
-            {name || 'Player'}
+            {playerName || 'Player'}
           </div>
           {isAdmin && (
             <span

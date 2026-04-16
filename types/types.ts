@@ -7,6 +7,7 @@ export interface Player {
   roundsBarred: number // Track how many rounds barred (for special privileges)
   isAdmin: boolean
   hasVoted: boolean // Track if player has voted in current round
+  isConnected: boolean // Track if player is currently connected
 }
 
 export interface GameRound {
@@ -29,8 +30,11 @@ export interface Game {
   rounds: GameRound[]
   currentRound: number
   electionCycleStartTime: number // timestamp for countdown
-  winner?: string // Player ID of winner
+  winner?: string | undefined; // Player ID of winner
   createdAt: number
+  // Computed fields for efficient lookups
+  adminPlayerId?: string // ID of the player with isAdmin = true
+  currentBarredPlayerIds?: string[] // IDs of players barred in current round
 }
 
 export interface GameStore {

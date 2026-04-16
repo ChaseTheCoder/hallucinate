@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { games } from '../../../../server/gameStore'
+import { games, enrichGame } from '../../../../server/gameStore'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 
@@ -27,42 +27,67 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const { code } = req.query
     const { voterId, votes } = req.body as VoteSubmission
 
-    // Validation
-    if (!voterId || !votes || !Array.isArray(votes) || votes.length < 1 || votes.length > 3) {
-      return res.status(400).json({ error: 'Invalid vote submission. Must provide voterId and array of 1-3 player IDs' })
-    }
+    try {
+      // Validation
+      if (!voterId || !votes || !Array.isArray(votes) || votes.length < 1 || votes.length > 3) {
+        return res.status(400).json({ 
+          error: 'Invalid vote submission',
+          details: 'Must provide voterId and array of 1-3 player IDs',
+          recoveryAction: 'Please check your vote and try again'
+        })
+      }
 
-    // Find game
-    const gameId = Object.keys(games).find(id => games[id].code === code as string)
-    if (!gameId) {
-      return res.status(404).json({ error: 'Game not found' })
-    }
+      // Find game
+      const gameId = Object.keys(games).find(id => games[id].code === code as string)
+      if (!gameId) {
+        return res.status(404).json({ 
+          error: 'Game not found',
+          details: 'The game code provided does not exist or has been deleted',
+          recoveryAction: 'Check the game code and try joining again'
+        })
+      }
 
-    const game = games[gameId]
+      const game = games[gameId]
 
-    // Check game status
-    if (game.status !== 'vote' && game.status !== 'final') {
-      return res.status(400).json({ error: 'Voting is not currently active' })
-    }
+      // Check game status
+      if (game.status !== 'vote' && game.status !== 'final') {
+        return res.status(400).json({ 
+          error: 'Voting is not currently active',
+          details: `Current game status: ${game.status}. Voting is only allowed during 'vote' and 'final' phases.`,
+          recoveryAction: 'Wait for the game to reach the voting phase'
+        })
+      }
 
-    // Find voter
-    const voter = game.players.find(p => p.id === voterId)
-    if (!voter) {
-      return res.status(404).json({ error: 'Voter not found' })
-    }
+      // Find voter
+      const voter = game.players.find(p => p.id === voterId)
+      if (!voter) {
+        return res.status(404).json({ 
+          error: 'Voter not found',
+          details: 'Your player ID was not found in this game. You may have been disconnected.',
+          recoveryAction: 'Rejoin the game with your player name'
+        })
+      }
 
-    // Check if already voted (simple boolean check)
-    if (voter.hasVoted) {
-      return res.status(400).json({ error: 'You have already voted in this round' })
-    }
+      // Check if already voted (simple boolean check)
+      if (voter.hasVoted) {
+        return res.status(400).json({ 
+          error: 'You have already voted in this round',
+          details: 'Each player can only vote once per round',
+          recoveryAction: 'Wait for the next round'
+        })
+      }
 
-    // Validate that all three votes are for different players
-    const uniqueVotes = new Set(votes)
+      // Validate that all three votes are for different players
+      const uniqueVotes = new Set(votes)
 
-    // Validate that voter didn't vote for themselves
-    if (votes.includes(voterId)) {
-      return res.status(400).json({ error: 'Cannot vote for yourself' })
-    }
+      // Validate that voter didn't vote for themselves
+      if (votes.includes(voterId)) {
+        return res.status(400).json({ 
+          error: 'Cannot vote for yourself',
+          details: 'You must vote for other players',
+          recoveryAction: 'Select different players and resubmit'
+        })
+      }
 
     // Validate that all voted players exist and are qualified to run for leader
     const votedPlayers = votes.map(playerId => {
@@ -87,21 +112,23 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       }
     }
 
-    // Add points to the voted players
-    votedPlayers.forEach((player, index) => {
-      player.votes += VOTE_POINTS[index]
-    })
+      // Add points to the voted players
+      votedPlayers.forEach((player, index) => {
+        player.votes += VOTE_POINTS[index]
+      })
 
-    // Mark voter as having voted
-    voter.hasVoted = true
+      // Mark voter as having voted and ensure they are marked as connected (handles reconnection)
+      voter.hasVoted = true
+      voter.isConnected = true
 
     // Record votes in round data (for audit trail)
     game.rounds[game.currentRound].votes[voterId] = VOTE_POINTS
 
-    // Check if ALL players have voted
-    const totalVoters = game.players.length
-    const votesSubmitted = game.players.filter(p => p.hasVoted).length
-    const allVotesIn = votesSubmitted >= totalVoters
+    // Check if ALL CONNECTED players have voted
+    const connectedPlayers = game.players.filter(p => p.isConnected)
+    const connectedVoters = connectedPlayers.length
+    const votesSubmitted = connectedPlayers.filter(p => p.hasVoted).length
+    const allVotesIn = votesSubmitted >= connectedVoters
 
     const resWithSocket = res as NextApiResponseWithSocket
 
@@ -134,14 +161,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         : null
 
       if (resWithSocket.socket?.server?.io) {
-        resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', {
-          players: game.players,
-          status: game.status,
-          barredPlayerName,
-          electionCycleStartTime: game.electionCycleStartTime,
-          cycleTime: game.cycleTime,
-          winner: game.winner
-        })
+        resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
 
         if (game.status === 'final') {
           // Emit winner info for final election
@@ -172,7 +192,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       // Broadcast voting progress only (NO results or leader info)
       resWithSocket.socket.server.io.to(`game-${code}`).emit('vote-progress', {
         votesSubmitted,
-        totalVoters,
+        connectedVoters,
         allVotesIn
       })
     }
@@ -180,11 +200,19 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     res.status(200).json({
       success: true,
       votesSubmitted,
-      totalVoters,
+      connectedVoters,
       allVotesIn,
       status: game.status,
       message: allVotesIn ? 'All votes are in!' : 'Vote recorded successfully'
     })
+    } catch (error: any) {
+      console.error('Vote submission error:', error)
+      return res.status(500).json({
+        error: 'An error occurred while processing your vote',
+        details: error?.message || 'Unknown error',
+        recoveryAction: 'Please try voting again'
+      })
+    }
   } else {
     res.status(405).end()
   }

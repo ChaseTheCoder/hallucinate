@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { Server as SocketIOServer } from 'socket.io'
 import { Server as NetServer, Socket } from 'net'
-import { games } from '../../../../server/gameStore'
+import { games, enrichGame } from '../../../../server/gameStore'
 
 interface SocketServer extends NetServer {
   io?: SocketIOServer
@@ -34,24 +34,33 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     // Remove player by name
     game.players = game.players.filter(p => p.name !== name)
 
-    // If admin left and there are still players, assign new admin
+    // If admin left and there are still players, ensure exactly one admin exists
     if (wasAdmin && game.players.length > 0) {
-      game.players[0].isAdmin = true
+      // First, check if there's already an admin
+      const existingAdmin = game.players.find(p => p.isAdmin)
       
-      // Notify the new admin
-      const resWithSocket = res as NextApiResponseWithSocket
-      if (resWithSocket.socket?.server?.io) {
-        resWithSocket.socket.server.io.to(`player-${code}-${game.players[0].name}`).emit('player-status-update', game.players[0])
+      if (!existingAdmin) {
+        // No admin exists, promote the first player
+        game.players[0].isAdmin = true
+        
+        // Notify the new admin
+        const resWithSocket = res as NextApiResponseWithSocket
+        if (resWithSocket.socket?.server?.io) {
+          resWithSocket.socket.server.io.to(`player-${code}-${game.players[0].name}`).emit('player-status-update', game.players[0])
+        }
+      }
+    } else if (!wasAdmin && game.players.length > 0) {
+      // Ensure at least one admin exists (safety check)
+      const hasAdmin = game.players.some(p => p.isAdmin)
+      if (!hasAdmin) {
+        game.players[0].isAdmin = true
       }
     }
 
     // Broadcast updated game state to all connected clients watching this game
     const resWithSocket = res as NextApiResponseWithSocket
     if (resWithSocket.socket?.server?.io) {
-      resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', {
-        players: game.players,
-        status: game.status
-      })
+      resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
     }
 
     res.status(200).json({ success: true, players: game.players })
