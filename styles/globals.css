@@ -1,18 +1,50 @@
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
 
+:root {
+  /* Semantic color tokens (UX/UI naming conventions) */
+  --color-text-primary: #303030;
+  --color-text-secondary: #C4C4C4;
+  --color-background-default: #EEEEEE;
+  --color-surface-white: #FFFFFF;
+  --color-action-disabled: #A6A6A6;
+  --color-border-accent: #5A5A5A;
+  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --app-screen-gutter: 16px;
+
+  /* Utility aliases for common usage */
+  --color-primary: var(--color-text-primary);
+  --color-secondary: var(--color-text-secondary);
+  --color-background: var(--color-background-default);
+  --color-white: var(--color-surface-white);
+  --color-disabled: var(--color-action-disabled);
+  --color-accent-line: var(--color-border-accent);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
 html,body,#__next{height:100%; overflow: hidden}
-body{font-family: Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; color: #5A5A5A; margin: 0; padding: 0}
+body{font-family: Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; color: var(--color-text-primary); background: linear-gradient(to bottom, var(--color-white) 0%, var(--color-background) 100%); letter-spacing: 0.1em; margin: 0; padding: 0}
+#__next {
+  padding: var(--app-screen-gutter);
+}
+
+/* Make top-level page containers fit within the global guttered viewport. */
+#__next > * {
+  height: 100% !important;
+  min-height: 100% !important;
+}
+
 button{cursor:pointer; font-family: Roboto, sans-serif}
-input{padding:8px; color: #5A5A5A}
-a{color: #5A5A5A}
-h1,h2,h3,h4,h5,h6{color: #5A5A5A}
+input{padding:8px; color: var(--color-text-primary)}
+a{color: var(--color-text-primary)}
+h1,h2,h3,h4,h5,h6{color: var(--color-text-primary)}
 
 .button {
   padding: 12px 24px;
   background-color: transparent;
-  color: #5A5A5A;
-  border: 1px solid #5A5A5A;
-  border-radius: 8px;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-accent);
+  border-radius: 40px;
   cursor: pointer;
   font-size: 1em;
   font-family: Roboto, sans-serif;
@@ -21,7 +53,7 @@ h1,h2,h3,h4,h5,h6{color: #5A5A5A}
 }
 
 .button:hover {
-  background-color: #f0f0f0;
+  background-color: var(--color-secondary);
 }
 
 .button:active {

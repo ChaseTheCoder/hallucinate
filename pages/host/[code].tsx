@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import io, { Socket } from 'socket.io-client'
 import Lucin from '../../components/Lucin'
-import Button from '../../components/Button'
+import Nav from './Nav'
+import Right from './Right'
 import { Game } from '../../types/types'
 import { gameContent } from '../../content/content'
 
@@ -381,48 +382,18 @@ export default function HostPage() {
       flexDirection: 'column',
       position: 'relative'
     }}>
-      <div style={{
-        position: 'absolute',
-        top: 24,
-        right: 24,
-        zIndex: 20,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        alignItems: 'flex-end'
-      }}>
-        <div style={{
-          padding: '10px 14px',
-          borderRadius: 12,
-          backgroundColor: connectionStatus === 'connected' ? '#E6F4EA' : connectionStatus === 'reconnecting' ? '#FFF7E6' : '#FCE8E6',
-          color: connectionStatus === 'connected' ? '#1F7A35' : connectionStatus === 'reconnecting' ? '#A36F05' : '#B91C1C',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.08)',
-          fontSize: '0.9em',
-          fontWeight: 600
-        }}>
-          {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'reconnecting' ? 'Reconnecting...' : 'Disconnected'}
-        </div>
-        {socketError ? (
-          <div style={{
-            padding: '10px 14px',
-            borderRadius: 12,
-            backgroundColor: '#FBE8E8',
-            color: '#B91C1C',
-            boxShadow: '0 10px 30px rgba(0,0,0,0.08)',
-            fontSize: '0.85em',
-            maxWidth: 320,
-            textAlign: 'right'
-          }}>
-            {socketError}
-          </div>
-        ) : null}
-      </div>
+      <Nav
+        gameStatus={game?.status}
+        code={gameCode}
+        connected={connected}
+        onEndGame={handleEndGame}
+      />
       <div
         style={{
           display: 'flex',
           flexDirection: 'row',
           height: '100%',
-          margin: 24,
+          marginTop: 24,
           flex: 1
         }}
       >
@@ -432,9 +403,8 @@ export default function HostPage() {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          flex: 1,
+          width: '70%',
           gap: 20,
-          width: '100%',
           height: '100%',
           position: 'relative'
         }}>
@@ -462,127 +432,12 @@ export default function HostPage() {
           ) : null}
         </div>
 
-        {/* Right Half - Players */}
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          flex: 1,
-          gap: 24,
-          width: '100%',
-          height: '100%'
-        }}>
-          <h2 style={{ color: '#5A5A5A', margin: 0 }}>
-            Candidates
-          </h2>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-              width: '100%',
-              maxWidth: 400
-            }}
-          >
-            {/* Qualified Players */}
-            {qualifiedPlayers.length === 0 ? (
-              <p style={{ textAlign: 'center', color: '#5A5A5A' }}>
-                No players have joined yet
-              </p>
-            ) : (
-              qualifiedPlayers.map((player, i) => (
-                <div
-                  key={player.id}
-                  style={{
-                    padding: '12px 20px',
-                    backgroundColor: '#5A5A5A',
-                    color: '#FFFFFF',
-                    fontWeight: '500',
-                    textAlign: 'center',
-                    borderRadius: 4
-                  }}
-                >
-                  {player.name}
-                  {game?.status === 'results' && ` (${player.votes} pts)`}
-                  {player.isAdmin && ' (Admin)'}
-                </div>
-              ))
-            )}
-
-            {/* Barred Players */}
-            {sortedBarredPlayers.length > 0 && (
-              <>
-                <h3 style={{ color: '#999', margin: '16px 0 8px 0', fontSize: '1em' }}>
-                  Barred
-                </h3>
-                {sortedBarredPlayers.map((player) => (
-                  <div
-                    key={player.id}
-                    style={{
-                      padding: '12px 20px',
-                      backgroundColor: '#E0E0E0',
-                      color: '#999',
-                      fontWeight: '500',
-                      textAlign: 'center',
-                      borderRadius: 4,
-                      fontStyle: 'italic'
-                    }}
-                  >
-                    {player.name}
-                    {player.isAdmin && ' (Admin)'}
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        </div>
+        <Right
+          qualifiedPlayers={qualifiedPlayers}
+          sortedBarredPlayers={sortedBarredPlayers}
+          gameStatus={game?.status}
+        />
       </div>
-      {game?.status ? (
-        <div style={{
-          position: 'absolute',
-          bottom: 16,
-          left: 0,
-          right: 0,
-          textAlign: 'center',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: 16
-        }}>
-          <span style={{ fontSize: 18, color: '#5A5A5A' }}>
-            <strong>Code: {code}</strong>
-          </span>
-          <span style={{ color: '#5A5A5A' }}>|</span>
-          <Button onClick={handleEndGame}>End Game</Button>
-          <span style={{ color: '#5A5A5A' }}>|</span>
-          <span style={{ fontSize: 18, color: '#5A5A5A' }}>
-            Status: {game.status} {connected ? '🟢' : '🔴'}
-          </span>
-        </div>
-      ) : (
-        <div style={{
-          position: 'absolute',
-          bottom: 16,
-          left: 0,
-          right: 0,
-          textAlign: 'center',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: 16
-        }}>
-          <span style={{ fontSize: 18, color: '#5A5A5A', animation: 'pulse 1.5s ease-in-out infinite' }}>
-            Loading...
-          </span>
-        </div>
-      )}
-      <style jsx>{`
-        @keyframes pulse {
-          0% { opacity: 1; }
-          50% { opacity: 0.35; }
-          100% { opacity: 1; }
-        }
-      `}</style>
     </div>
   )
 }

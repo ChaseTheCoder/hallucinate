@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import io, { Socket } from 'socket.io-client'
 import Button from '../../components/Button'
+import VoteButton from '../../components/VoteButton'
 import VotePanel from './components/VotePanel'
 import { gameContent } from '../../content/content'
 import { Player } from '../../types/types'
@@ -39,6 +40,10 @@ export default function PlayerPage() {
   const [winnerId, setWinnerId] = useState<string | null>(null)
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('disconnected')
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [isLeader, setIsLeader] = useState(false)
+  const [qualifiedPlayers, setQualifiedPlayers] = useState<Player[]>([])
+  const [decisionCandidates, setDecisionCandidates] = useState<Player[]>([])
 
   // Initialize session data from URL and localStorage
   useEffect(() => {
@@ -227,6 +232,18 @@ export default function PlayerPage() {
     }
   }, [gameStatus])
 
+  useEffect(() => {
+    const nextIsAdmin = currentPlayer?.isAdmin || false
+    const nextIsLeader = currentPlayer?.leader || false
+    const nextQualifiedPlayers = allPlayers.filter(p => p.isQualified)
+    const nextDecisionCandidates = nextQualifiedPlayers.filter(p => !p.leader)
+
+    setIsAdmin(nextIsAdmin)
+    setIsLeader(nextIsLeader)
+    setQualifiedPlayers(nextQualifiedPlayers)
+    setDecisionCandidates(nextDecisionCandidates)
+  }, [currentPlayer, allPlayers])
+
   // Countdown timer for campaign
   useEffect(() => {
     if (gameStatus !== 'campaign' || electionCycleStartTime === 0) {
@@ -396,11 +413,6 @@ export default function PlayerPage() {
     )
   }
 
-  const isAdmin = currentPlayer?.isAdmin || false
-  const isLeader = currentPlayer?.leader || false
-  const qualifiedPlayers = allPlayers.filter(p => p.isQualified)
-  const decisionCandidates = qualifiedPlayers.filter(p => !p.leader)
-
   const getWinnerInfo = (winnerId: string | null) => {
     const winner = allPlayers.find(p => p.id === winnerId)
     return {
@@ -540,27 +552,12 @@ export default function PlayerPage() {
               }}
             >
               {decisionCandidates.map(player => (
-                <button
+                <VoteButton
                   key={player.id}
+                  label={player.name}
+                  selected={decisionSelection === player.id}
                   onClick={() => setDecisionSelection(player.id)}
-                  style={{
-                    padding: '16px 20px',
-                    backgroundColor: decisionSelection === player.id ? '#2E7D32' : '#E0E0E0',
-                    color: decisionSelection === player.id ? '#FFFFFF' : '#5A5A5A',
-                    border: 'none',
-                    borderRadius: 4,
-                    fontSize: '1em',
-                    fontWeight: decisionSelection === player.id ? 'bold' : '500',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    transition: 'all 0.2s ease',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span>{player.name}</span>
-                </button>
+                />
               ))}
             </div>
 

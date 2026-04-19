@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import Button from '../../../components/Button';
+import VoteButton from '../../../components/VoteButton'
 import { Player } from '../../../types/types';
 
 interface VotePanelProps {
@@ -156,30 +157,16 @@ export default function VotePanel({
           const voteValue = getVoteValue(votePosition)
 
           return (
-            <button
+            <VoteButton
               key={player.id}
+              label={player.name}
+              selected={!!votePosition}
               onClick={() => handlePlayerSelect(player.id)}
-              style={{
-                padding: '16px 20px',
-                backgroundColor: votePosition ? '#2E7D32' : '#E0E0E0',
-                color: votePosition ? '#FFFFFF' : '#5A5A5A',
-                border: 'none',
-                borderRadius: 4,
-                fontSize: '1em',
-                fontWeight: votePosition ? 'bold' : '500',
-                cursor: 'pointer',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                transition: 'all 0.2s ease',
-                textAlign: 'left'
-              }}
-            >
-              <span>{player.name}</span>
-              {voteValue && (
+              rightContent={voteValue ? (
                 <span
                   style={{
-                    backgroundColor: votePosition === 'first' ? '#1B5E20' : votePosition === 'second' ? '#2E7D32' : '#388E3C',
+                    backgroundColor: votePosition === 'first' ? 'var(--color-accent-line)' : votePosition === 'second' ? 'var(--color-text-secondary)' : 'var(--color-background)',
+                    color: votePosition === 'first' ? 'var(--color-white)' : 'var(--color-text-primary)',
                     padding: '4px 12px',
                     borderRadius: 12,
                     fontSize: '0.9em',
@@ -190,8 +177,9 @@ export default function VotePanel({
                 >
                   {voteValue}
                 </span>
-              )}
-            </button>
+              ) : null}
+            >
+            </VoteButton>
           )
         })}
       </div>
