@@ -1,15 +1,15 @@
 import { Game } from '../../types/types'
-import Text from '../../components/Text'
-import CandidateListItem from '../../components/CandidateListItem'
-import LineBreak from '../../components/LineBreak'
+import Text from '../Text'
+import CandidateListItem from '../CandidateListItem'
+import LineBreak from '../LineBreak'
 
 type RightProps = {
-	qualifiedPlayers: Game['players']
-	sortedBarredPlayers: Game['players']
+	qualifiedPlayers?: Game['players']
+	sortedBarredPlayers?: Game['players']
 	gameStatus?: Game['status']
 }
 
-export default function Right({ qualifiedPlayers, sortedBarredPlayers, gameStatus }: RightProps) {
+export default function Right({ qualifiedPlayers = [], sortedBarredPlayers = [], gameStatus }: RightProps = {}) {
 	return (
 		<div style={{
 			display: 'flex',
@@ -31,7 +31,7 @@ export default function Right({ qualifiedPlayers, sortedBarredPlayers, gameStatu
 				}}
 			>
                 <LineBreak />
-				{qualifiedPlayers.length === 0 ? (
+				{qualifiedPlayers?.length === 0 ? (
 					<p style={{ textAlign: 'center', color: '#5A5A5A' }}>
 						No players have joined yet
 					</p>

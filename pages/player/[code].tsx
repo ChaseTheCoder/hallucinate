@@ -3,7 +3,7 @@ import { useRouter } from 'next/router'
 import io, { Socket } from 'socket.io-client'
 import Button from '../../components/Button'
 import VoteButton from '../../components/VoteButton'
-import VotePanel from './components/VotePanel'
+import VotePanel from '../../components/player/VotePanel'
 import { gameContent } from '../../content/content'
 import { Player } from '../../types/types'
 

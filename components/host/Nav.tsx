@@ -1,6 +1,6 @@
-import Button from '../../components/Button'
+import Button from '../Button'
 import { Game } from '../../types/types'
-import Text from '../../components/Text'
+import Text from '../Text'
 
 type NavProps = {
 	gameStatus?: Game['status']

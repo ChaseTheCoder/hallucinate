@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
-import Button from '../../../components/Button';
-import VoteButton from '../../../components/VoteButton'
-import { Player } from '../../../types/types';
+import Button from '../Button';
+import VoteButton from '../VoteButton'
+import { Player } from '../../types/types';
 
 interface VotePanelProps {
   currentPlayer: Player
