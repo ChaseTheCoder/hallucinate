@@ -26,7 +26,6 @@ export default function HostPage() {
   const hasTransitionedRef = useRef(false)
   const [messageIndex, setMessageIndex] = useState(0)
   const [barredPlayerName, setBarredPlayerName] = useState<string | null>(null)
-  const [players, setPlayers] = useState<Game['players']>([])
   const [leaderName, setLeaderName] = useState<string>('TBD')
   const [currentRound, setCurrentRound] = useState<number>(0)
   const [timeRemaining, setTimeRemaining] = useState<string>('')
@@ -205,7 +204,6 @@ export default function HostPage() {
       nextTimeRemaining = `${minutes}:${seconds.toString().padStart(2, '0')}`
     }
 
-    setPlayers(nextPlayers)
     setLeaderName(nextLeaderName)
     setCurrentRound(game?.currentRound ?? 0)
     setTimeRemaining(nextTimeRemaining)
@@ -350,8 +348,7 @@ export default function HostPage() {
       if (!res.ok) {
         throw new Error('Failed to end game')
       }
-      console.log('Game ended successfully')
-      // Router push handled by socket listener
+      router.push('/start')
     } catch (error) {
       console.error('Error ending game:', error)
       alert('Failed to end game')

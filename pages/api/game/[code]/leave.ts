@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { Server as SocketIOServer } from 'socket.io'
 import { Server as NetServer, Socket } from 'net'
-import { games, enrichGame } from '../../../../server/gameStore'
+import { enrichGame, findGameByCode, persistGame } from '../../../../server/gameStore'
 
 interface SocketServer extends NetServer {
   io?: SocketIOServer
@@ -15,17 +15,15 @@ interface NextApiResponseWithSocket extends NextApiResponse {
   socket: SocketWithIO
 }
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'POST') {
     const { code } = req.query
     const { name } = req.body
 
-    const gameId = Object.keys(games).find(id => games[id].code === code as string)
-    if (!gameId) {
+    const game = await findGameByCode(code as string)
+    if (!game) {
       return res.status(404).json({ error: 'Game not found' })
     }
-
-    const game = games[gameId]
 
     // Check if leaving player was admin
     const leavingPlayer = game.players.find(p => p.name === name)
@@ -62,6 +60,8 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     if (resWithSocket.socket?.server?.io) {
       resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
     }
+
+    await persistGame(game)
 
     res.status(200).json({ success: true, players: game.players })
   } else {

@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { games, enrichGame } from '../../../../server/gameStore'
+import { enrichGame, findGameByCode, persistGame } from '../../../../server/gameStore'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 import { StatusTypes } from '../../../../types/types'
@@ -16,12 +16,12 @@ interface NextApiResponseWithSocket extends NextApiResponse {
   socket: SocketWithIO
 }
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'PATCH') {
     const { code } = req.query
     const { cycleTime } = req.body
 
-    const game = Object.values(games).find(g => g.code === code as string)
+    const game = await findGameByCode(code as string)
     if (!game) {
       return res.status(404).json({ error: 'Game not found' })
     }
@@ -105,6 +105,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       if (resWithSocket.socket?.server?.io) {
         resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
       }
+      await persistGame(game)
       return res.status(200).json({ success: true, status: newStatus })
     }
 
@@ -113,6 +114,8 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     if (resWithSocket.socket?.server?.io) {
       resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
     }
+
+    await persistGame(game)
 
     res.status(200).json({ success: true, status: newStatus })
   } else {

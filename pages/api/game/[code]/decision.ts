@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { games, enrichGame } from '../../../../server/gameStore'
+import { enrichGame, findGameByCode, persistGame } from '../../../../server/gameStore'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 
@@ -20,7 +20,7 @@ interface DecisionSubmission {
   barredId: string
 }
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     res.status(405).end()
     return
@@ -33,12 +33,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     return res.status(400).json({ error: 'Missing leaderId or barredId' })
   }
 
-  const gameId = Object.keys(games).find(id => games[id].code === code as string)
-  if (!gameId) {
+  const game = await findGameByCode(code as string)
+  if (!game) {
     return res.status(404).json({ error: 'Game not found' })
   }
-
-  const game = games[gameId]
 
   if (game.status !== 'decision') {
     return res.status(400).json({ error: 'Game is not in decision status' })
@@ -75,6 +73,8 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (resWithSocket.socket?.server?.io) {
     resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
   }
+
+  await persistGame(game)
 
   res.status(200).json({
     success: true,
