@@ -342,11 +342,18 @@ export default function HostPage() {
     if (!confirmed) return
 
     try {
+      const hostAccessKey = typeof window !== 'undefined'
+        ? window.sessionStorage.getItem('hostAccessKey') || ''
+        : ''
       const res = await fetch(`/api/game/${gameCode}/delete`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: {
+          'x-host-access-key': hostAccessKey
+        }
       })
       if (!res.ok) {
-        throw new Error('Failed to end game')
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || 'Failed to end game')
       }
       router.push('/start')
     } catch (error) {
@@ -358,8 +365,14 @@ export default function HostPage() {
   const handleTransition = async () => {
     if (!gameCode) return
     try {
+      const hostAccessKey = typeof window !== 'undefined'
+        ? window.sessionStorage.getItem('hostAccessKey') || ''
+        : ''
       const res = await fetch(`/api/game/${gameCode}/update`, {
-        method: 'PATCH'
+        method: 'PATCH',
+        headers: {
+          'x-host-access-key': hostAccessKey
+        }
       })
       if (!res.ok) {
         const data = await res.json().catch(() => null)

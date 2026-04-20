@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import { deletePersistedGame, findGameByCode } from '../../../../server/gameStore'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
-import { unregisterGameOwner } from '../../../../server/abuseGuard'
+import { isHostAccessAllowed, unregisterGameOwner } from '../../../../server/abuseGuard'
 
 interface SocketServer extends NetServer {
   io?: SocketIOServer
@@ -18,6 +18,10 @@ interface NextApiResponseWithSocket extends NextApiResponse {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'DELETE') {
+    if (!isHostAccessAllowed(req.headers['x-host-access-key'])) {
+      return res.status(401).json({ error: 'Host verification failed' })
+    }
+
     const { code } = req.query
 
     const game = await findGameByCode(code as string)

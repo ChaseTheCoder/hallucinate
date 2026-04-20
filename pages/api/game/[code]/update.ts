@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { enrichGame, findGameByCode, persistGame } from '../../../../server/gameStore'
+import { isHostAccessAllowed } from '../../../../server/abuseGuard'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 import { StatusTypes } from '../../../../types/types'
@@ -18,6 +19,10 @@ interface NextApiResponseWithSocket extends NextApiResponse {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'PATCH') {
+    if (!isHostAccessAllowed(req.headers['x-host-access-key'])) {
+      return res.status(401).json({ error: 'Host verification failed' })
+    }
+
     const { code } = req.query
     const { cycleTime } = req.body
 

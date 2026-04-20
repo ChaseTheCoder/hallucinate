@@ -3,15 +3,29 @@ type WindowState = {
   resetAt: number
 }
 
+function readPositiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.floor(parsed)
+}
+
 const createWindowByIp = new Map<string, WindowState>()
 const joinWindowByIp = new Map<string, WindowState>()
 const gameOwnerByCode = new Map<string, string>()
 
-const CREATE_WINDOW_MS = 10 * 60 * 1000
-const JOIN_WINDOW_MS = 10 * 60 * 1000
-const MAX_CREATE_PER_WINDOW = 5
-const MAX_JOIN_PER_WINDOW = 40
-const MAX_ACTIVE_GAMES_PER_IP = 3
+const CREATE_WINDOW_MS = readPositiveInt(process.env.CREATE_WINDOW_MS, 10 * 60 * 1000)
+const JOIN_WINDOW_MS = readPositiveInt(process.env.JOIN_WINDOW_MS, 10 * 60 * 1000)
+const MAX_CREATE_PER_WINDOW = readPositiveInt(process.env.MAX_CREATE_PER_WINDOW, 3)
+const MAX_JOIN_PER_WINDOW = readPositiveInt(process.env.MAX_JOIN_PER_WINDOW, 40)
+const MAX_ACTIVE_GAMES_PER_IP = readPositiveInt(process.env.MAX_ACTIVE_GAMES_PER_IP, 1)
+const MVP_HOST_ACCESS_KEY = process.env.MVP_HOST_ACCESS_KEY?.trim() || ''
+
+export function isHostAccessAllowed(hostAccessKey: string | string[] | undefined): boolean {
+  if (!MVP_HOST_ACCESS_KEY) return true
+  const provided = Array.isArray(hostAccessKey) ? hostAccessKey[0] : hostAccessKey
+  if (!provided) return false
+  return provided.trim() === MVP_HOST_ACCESS_KEY
+}
 
 function bumpWindow(map: Map<string, WindowState>, ip: string, windowMs: number): WindowState {
   const now = Date.now()

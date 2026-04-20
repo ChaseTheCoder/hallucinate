@@ -1,23 +1,48 @@
 import { Game, GameStore } from '../types/types'
-import { neon } from '@neondatabase/serverless'
+import { Pool } from 'pg'
 
 // Simple in-memory game store
 export const games: GameStore = {}
 
-const DATABASE_URL = process.env.DATABASE_URL
-const sql = DATABASE_URL ? neon(DATABASE_URL) : null
+const DATABASE_URL = process.env.NODE_ENV === 'development'
+  ? (process.env.DATABASE_URL_LOCAL || process.env.DATABASE_URL)
+  : process.env.DATABASE_URL
+
+const pool = DATABASE_URL
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      ssl: DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+    })
+  : null
 let dbReady = false
+let dbDisabledForSession = false
 
 async function ensureDbReady() {
-  if (!sql || dbReady) return
+  if (!pool || dbReady || dbDisabledForSession) return
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS games_state (
-      code TEXT PRIMARY KEY,
-      payload JSONB NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  try {
+    await pool.query(
+      `
+        CREATE TABLE IF NOT EXISTS games_state (
+          code TEXT PRIMARY KEY,
+          payload JSONB NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `
     )
-  `
+  } catch (error: unknown) {
+    const err = error as { code?: string; hostname?: string; message?: string }
+    if (err?.code === 'ENOTFOUND' && process.env.NODE_ENV === 'development') {
+      dbDisabledForSession = true
+      console.warn(
+        `[DB] Database host not found (${err.hostname || 'unknown host'}). ` +
+        `Falling back to in-memory store for this local dev session. ` +
+        `Use Render's EXTERNAL database URL in DATABASE_URL_LOCAL for persistent local testing.`
+      )
+      return
+    }
+    throw error
+  }
 
   dbReady = true
 }
@@ -35,11 +60,12 @@ async function gameCodeExists(code: string): Promise<boolean> {
   const inMemoryExists = Object.values(games).some(g => g.code === code)
   if (inMemoryExists) return true
 
-  if (!sql) return false
+  if (!pool || dbDisabledForSession) return false
 
   await ensureDbReady()
-  const rows = await sql`SELECT 1 FROM games_state WHERE code = ${code} LIMIT 1`
-  return !!rows?.length
+  if (dbDisabledForSession) return false
+  const result = await pool.query('SELECT 1 FROM games_state WHERE code = $1 LIMIT 1', [code])
+  return result.rowCount > 0
 }
 
 export async function createGame(): Promise<Game> {
@@ -69,14 +95,18 @@ export async function createGame(): Promise<Game> {
 export async function persistGame(game: Game): Promise<void> {
   games[game.id] = game
 
-  if (!sql) return
+  if (!pool || dbDisabledForSession) return
   await ensureDbReady()
-  await sql`
-    INSERT INTO games_state (code, payload, updated_at)
-    VALUES (${game.code}, ${JSON.stringify(game)}::jsonb, NOW())
-    ON CONFLICT (code)
-    DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
-  `
+  if (dbDisabledForSession) return
+  await pool.query(
+    `
+      INSERT INTO games_state (code, payload, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (code)
+      DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+    `,
+    [game.code, JSON.stringify(game)]
+  )
 }
 
 export async function deletePersistedGame(code: string): Promise<void> {
@@ -85,9 +115,10 @@ export async function deletePersistedGame(code: string): Promise<void> {
     delete games[gameId]
   }
 
-  if (!sql) return
+  if (!pool || dbDisabledForSession) return
   await ensureDbReady()
-  await sql`DELETE FROM games_state WHERE code = ${code}`
+  if (dbDisabledForSession) return
+  await pool.query('DELETE FROM games_state WHERE code = $1', [code])
 }
 
 function normalizeLoadedGame(raw: unknown): Game | null {
@@ -111,13 +142,14 @@ export async function findGameByCode(code: string): Promise<Game | null> {
   const inMemory = Object.values(games).find(g => g.code === code)
   if (inMemory) return inMemory
 
-  if (!sql) return null
+  if (!pool || dbDisabledForSession) return null
 
   await ensureDbReady()
-  const rows = await sql`SELECT payload FROM games_state WHERE code = ${code} LIMIT 1`
-  if (!rows?.length) return null
+  if (dbDisabledForSession) return null
+  const result = await pool.query<{ payload: unknown }>('SELECT payload FROM games_state WHERE code = $1 LIMIT 1', [code])
+  if (!result.rows?.length) return null
 
-  const loaded = normalizeLoadedGame(rows[0]?.payload)
+  const loaded = normalizeLoadedGame(result.rows[0]?.payload)
   if (!loaded) return null
 
   games[loaded.id] = loaded
