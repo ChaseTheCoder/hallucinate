@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import { Server as HTTPServer } from 'http'
 import { Socket as NetSocket } from 'net'
 import { Server as IOServer } from 'socket.io'
-import { games, enrichGame } from '../../server/gameStore'
+import { enrichGame, findGameByCode, persistGame } from '../../server/gameStore'
 
 interface SocketServer extends HTTPServer {
   io?: IOServer | undefined
@@ -32,8 +32,8 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
 
     io.on('connection', (socket) => {
       // Single subscription point - broadcasts complete enriched game state to all clients
-      socket.on('subscribe-to-game', (code: string) => {
-        const game = Object.values(games).find(g => g.code === code)
+      socket.on('subscribe-to-game', async (code: string) => {
+        const game = await findGameByCode(code)
         if (!game) {
           socket.emit('error', 'Game not found')
           return
@@ -55,6 +55,8 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
           // No admin exists but we're in join phase - make first player admin
           game.players[0].isAdmin = true
         }
+
+        await persistGame(game)
         
         // Join unified game room
         socket.join(`game-${code}`)
@@ -64,9 +66,9 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
       })
 
       // Player connection tracking - separate from data broadcasting
-      socket.on('subscribe-to-player', (data: { code: string, playerName?: string, playerId?: string }) => {
+      socket.on('subscribe-to-player', async (data: { code: string, playerName?: string, playerId?: string }) => {
         const { code, playerName, playerId } = data
-        const game = Object.values(games).find(g => g.code === code)
+        const game = await findGameByCode(code)
         if (!game) {
           socket.emit('error', 'Game not found')
           return
@@ -106,15 +108,17 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
           player.isAdmin = true
         }
 
+        await persistGame(game)
+
         socket.join(`player-${code}-${resolvedPlayerName}`)
       })
 
-      socket.on('disconnect', () => {
+      socket.on('disconnect', async () => {
         // Mark player as disconnected when socket closes
         const playerInfo = socketToPlayer.get(socket.id)
         if (playerInfo) {
           const { code, playerName } = playerInfo
-          const game = Object.values(games).find(g => g.code === code)
+          const game = await findGameByCode(code)
           if (game) {
             const player = game.players.find(p => p.name === playerName)
             if (player) {
@@ -126,6 +130,8 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
                 playerId: player.id,
                 message: `${playerName} has disconnected`
               })
+
+              await persistGame(game)
             }
           }
           socketToPlayer.delete(socket.id)

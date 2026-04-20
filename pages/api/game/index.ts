@@ -13,7 +13,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(429).json({ error: 'Too many game creation attempts. Please try again later.' })
     }
 
-    const game = createGame()
+    const game = await createGame()
     await persistGame(game)
     registerGameOwner(game.code, ip)
     return res.status(200).json(game)

@@ -31,10 +31,21 @@ function makeCode(len: number = 4): string {
   return s
 }
 
-export function createGame(): Game {
+async function gameCodeExists(code: string): Promise<boolean> {
+  const inMemoryExists = Object.values(games).some(g => g.code === code)
+  if (inMemoryExists) return true
+
+  if (!sql) return false
+
+  await ensureDbReady()
+  const rows = await sql`SELECT 1 FROM games_state WHERE code = ${code} LIMIT 1`
+  return !!rows?.length
+}
+
+export async function createGame(): Promise<Game> {
   const id = crypto.randomUUID()
   let code = makeCode()
-  while (Object.values(games).some(g => g.code === code)) {
+  while (await gameCodeExists(code)) {
     code = makeCode()
   }
   const game: Game = {
