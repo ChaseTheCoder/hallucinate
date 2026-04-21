@@ -15,10 +15,6 @@ export default function Start() {
 
     try {
       const trimmedKey = hostAccessKey.trim()
-      if (typeof window !== 'undefined') {
-        window.sessionStorage.setItem('hostAccessKey', trimmedKey)
-      }
-
       const res = await fetch('/api/game', {
         method: 'POST',
         headers: {

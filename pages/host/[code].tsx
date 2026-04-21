@@ -6,6 +6,7 @@ import Nav from '../../components/host/Nav'
 import Right from '../../components/host/Right'
 import { Game } from '../../types/types'
 import { gameContent } from '../../content/content'
+import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment } from '../../content/hostNarration'
 
 let socket: Socket | null = null
 
@@ -38,6 +39,10 @@ export default function HostPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [latestBarredName, setLatestBarredName] = useState<string | null>(null)
   const [currentHostMessage, setCurrentHostMessage] = useState<string>('Loading...')
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false)
+  const [audioRetryTick, setAudioRetryTick] = useState(0)
+  const [audioDebugMessage, setAudioDebugMessage] = useState<string | null>(null)
+  const narrationAudioRef = useRef<HTMLAudioElement | null>(null)
 
   // socket connection and game state management
   useEffect(() => {
@@ -257,16 +262,111 @@ export default function HostPage() {
     }
   }, [game?.status])
 
-  // Cycle through host messages with 4-second delays
+  // Play narration for each indexed host message and only advance after playback ends.
   useEffect(() => {
-    if (!Array.isArray(content?.hostMessage) || messageIndex >= content.hostMessage.length - 1) return
+    if (!game?.status || !Array.isArray(content?.hostMessage) || messageIndex >= content.hostMessage.length) return
 
-    const timeout = setTimeout(() => {
-      setMessageIndex(prev => prev + 1)
-    }, 4000)
+    const segment = getHostNarrationSegment(game.status, messageIndex)
+    const delayMs = segment?.pauseAfterMs ?? DEFAULT_HOST_PAUSE_MS
+    const isLastMessage = messageIndex >= content.hostMessage.length - 1
 
-    return () => clearTimeout(timeout)
-  }, [content?.hostMessage, messageIndex])
+    let isCancelled = false
+    let fallbackTimeout: ReturnType<typeof setTimeout> | null = null
+
+    if (narrationAudioRef.current) {
+      narrationAudioRef.current.pause()
+      narrationAudioRef.current = null
+    }
+
+    if (!segment?.audioUrl) {
+      setAudioDebugMessage(null)
+      setAutoplayBlocked(false)
+      fallbackTimeout = setTimeout(() => {
+        if (!isCancelled && !isLastMessage) {
+          setMessageIndex(prev => prev + 1)
+        }
+      }, delayMs)
+
+      return () => {
+        isCancelled = true
+        if (fallbackTimeout) clearTimeout(fallbackTimeout)
+      }
+    }
+
+    const audio = new Audio(segment.audioUrl)
+    narrationAudioRef.current = audio
+    audio.preload = 'auto'
+    setAudioDebugMessage(null)
+    setAutoplayBlocked(false)
+
+    const handleEnded = () => {
+      if (isCancelled) return
+      if (isLastMessage) return
+      fallbackTimeout = setTimeout(() => {
+        if (!isCancelled) {
+          setMessageIndex(prev => prev + 1)
+        }
+      }, delayMs)
+    }
+
+    const handleError = () => {
+      if (isCancelled) return
+      setAudioDebugMessage(
+        `Audio unavailable for ${segment.audioObjectKey}. ` +
+        `If using Cloudflare R2, use a public r2.dev/custom domain URL, not r2.cloudflarestorage.com.`
+      )
+      if (isLastMessage) return
+      fallbackTimeout = setTimeout(() => {
+        if (!isCancelled) {
+          setMessageIndex(prev => prev + 1)
+        }
+      }, delayMs)
+    }
+
+    audio.addEventListener('ended', handleEnded)
+    audio.addEventListener('error', handleError)
+
+    audio.play().catch((error: unknown) => {
+      const err = error as { name?: string }
+      if (err?.name === 'NotAllowedError') {
+        setAutoplayBlocked(true)
+        setAudioDebugMessage('Browser blocked autoplay. Audio will auto-retry on the next user interaction.')
+        return
+      }
+      handleError()
+    })
+
+    return () => {
+      isCancelled = true
+      audio.pause()
+      audio.removeEventListener('ended', handleEnded)
+      audio.removeEventListener('error', handleError)
+      if (fallbackTimeout) clearTimeout(fallbackTimeout)
+      if (narrationAudioRef.current === audio) {
+        narrationAudioRef.current = null
+      }
+    }
+  }, [game?.status, content?.hostMessage, messageIndex, audioRetryTick])
+
+  useEffect(() => {
+    if (!autoplayBlocked) return
+
+    const retryPlayback = () => {
+      setAutoplayBlocked(false)
+      setAudioDebugMessage(null)
+      setAudioRetryTick(prev => prev + 1)
+    }
+
+    document.addEventListener('pointerdown', retryPlayback)
+    document.addEventListener('keydown', retryPlayback)
+    document.addEventListener('touchstart', retryPlayback)
+
+    return () => {
+      document.removeEventListener('pointerdown', retryPlayback)
+      document.removeEventListener('keydown', retryPlayback)
+      document.removeEventListener('touchstart', retryPlayback)
+    }
+  }, [autoplayBlocked])
 
   useEffect(() => {
     let nextMessage = loadError
@@ -342,14 +442,8 @@ export default function HostPage() {
     if (!confirmed) return
 
     try {
-      const hostAccessKey = typeof window !== 'undefined'
-        ? window.sessionStorage.getItem('hostAccessKey') || ''
-        : ''
       const res = await fetch(`/api/game/${gameCode}/delete`, {
-        method: 'DELETE',
-        headers: {
-          'x-host-access-key': hostAccessKey
-        }
+        method: 'DELETE'
       })
       if (!res.ok) {
         const data = await res.json().catch(() => null)
@@ -365,14 +459,8 @@ export default function HostPage() {
   const handleTransition = async () => {
     if (!gameCode) return
     try {
-      const hostAccessKey = typeof window !== 'undefined'
-        ? window.sessionStorage.getItem('hostAccessKey') || ''
-        : ''
       const res = await fetch(`/api/game/${gameCode}/update`, {
-        method: 'PATCH',
-        headers: {
-          'x-host-access-key': hostAccessKey
-        }
+        method: 'PATCH'
       })
       if (!res.ok) {
         const data = await res.json().catch(() => null)
@@ -422,6 +510,11 @@ export default function HostPage() {
           <p style={{ textAlign: 'center', fontSize: '1.2em', maxWidth: '80%' }}>
             {currentHostMessage}
           </p>
+          {audioDebugMessage ? (
+            <p style={{ textAlign: 'center', color: '#E03E3E', marginTop: 8, fontSize: '0.9em', maxWidth: '80%' }}>
+              {audioDebugMessage}
+            </p>
+          ) : null}
           {game?.status === 'campaign' && remainingSeconds > 0 ? (
             <div style={{
               marginTop: 12,

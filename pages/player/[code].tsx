@@ -340,48 +340,35 @@ export default function PlayerPage() {
     router.push('/')
   }
 
-  async function handleEndGame() {
-    if (!gameCode) return
-
-    try {
-      const res = await fetch(`/api/game/${gameCode}/delete`, {
-        method: 'DELETE'
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || `Failed to end game (${res.status})`)
-      }
-      console.log('Game ended successfully')
-      // Clear stored session info and redirect
-      localStorage.removeItem('playerSession')
-      router.push('/')
-    } catch (error) {
-      console.error('Error ending game:', error)
-      alert('Failed to end game')
-    }
-  }
-
   const handleStartGameClick = async () => {
     if (!gameCode) return
+
     try {
-      const body: any = {}
+      const body: { cycleTime?: number } = {}
       if (gameStatus === 'join') {
-        const seconds = parseInt(cycleTimeInput)
+        const seconds = parseInt(cycleTimeInput, 10)
         if (isNaN(seconds) || seconds < 5 || seconds > 60) {
           alert('Please enter a valid number of seconds (5-60)')
           return
         }
         body.cycleTime = seconds
-        setCycleTimeSet(true)
       }
+
       const res = await fetch(`/api/game/${gameCode}/update`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
       })
+
       if (!res.ok) {
         const data = await res.json().catch(() => null)
         throw new Error(data?.error || 'Failed to start game')
+      }
+
+      if (gameStatus === 'join') {
+        setCycleTimeSet(true)
       }
     } catch (error) {
       console.error('Error starting game:', error)
@@ -621,41 +608,26 @@ export default function PlayerPage() {
                     border: '1px solid #5A5A5A',
                     borderRadius: 4,
                     textAlign: 'center',
-                    width: '100px'
+                    width: '120px'
                   }}
                 />
-                <Button 
-                  onClick={handleStartGameClick} 
+                <Button
+                  onClick={handleStartGameClick}
                   disabled={allPlayers.length < 4}
                   style={{ marginTop: 12 }}
                 >
                   Start Game
                 </Button>
                 {allPlayers.length < 4 && (
-                  <p style={{ 
-                    color: '#E03E3E', 
-                    textAlign: 'center', 
-                    marginTop: 8, 
-                    fontSize: '0.9em' 
+                  <p style={{
+                    color: '#E03E3E',
+                    textAlign: 'center',
+                    marginTop: 8,
+                    fontSize: '0.9em'
                   }}>
                     Need at least 4 players to start ({allPlayers.length}/4)
                   </p>
                 )}
-              </>
-            )}
-            {isAdmin && gameStatus === 'final' && (
-              <>
-                <p
-                  style={{
-                    color: '#5A5A5A',
-                    textAlign: 'center',
-                    marginTop: 12,
-                    paddingTop: 36
-                  }}
-                >
-                  Game complete! End the game when ready.
-                </p>
-                <Button onClick={handleEndGame}>End Game</Button>
               </>
             )}
             {isAdmin && (gameStatus !== 'join' || cycleTimeSet) && gameStatus !== 'campaign' && gameStatus !== 'final' && (
