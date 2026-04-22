@@ -311,10 +311,6 @@ export default function HostPage() {
 
     const handleError = () => {
       if (isCancelled) return
-      setAudioDebugMessage(
-        `Audio unavailable for ${segment.audioObjectKey}. ` +
-        `If using Cloudflare R2, use a public r2.dev/custom domain URL, not r2.cloudflarestorage.com.`
-      )
       if (isLastMessage) return
       fallbackTimeout = setTimeout(() => {
         if (!isCancelled) {

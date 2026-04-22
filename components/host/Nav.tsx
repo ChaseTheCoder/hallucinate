@@ -1,6 +1,7 @@
 import Button from '../Button'
 import { Game } from '../../types/types'
 import Text from '../Text'
+import ButtonLiquid from '../ButtonLiquid'
 
 type NavProps = {
 	gameStatus?: Game['status']
@@ -40,7 +41,7 @@ export default function Nav({ gameStatus, code, connected, onEndGame }: NavProps
 
 				<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
 					{gameStatus ?
-                        <Button onClick={onEndGame}>End Game</Button> :
+                        <ButtonLiquid onClick={onEndGame}>End Game</ButtonLiquid> :
 					    <span style={{ fontSize: 16, color: '#5A5A5A', fontWeight: 600, animation: 'pulse 1.5s ease-in-out infinite' }}>
 							Loading...
 						</span>
