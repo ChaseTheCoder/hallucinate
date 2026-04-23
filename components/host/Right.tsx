@@ -1,6 +1,6 @@
 import { Game } from '../../types/types'
 import Text from '../Text'
-import CandidateListItem from '../CandidateListItem'
+import CandidateListItem from './CandidateListItem'
 import LineBreak from '../LineBreak'
 
 type RightProps = {

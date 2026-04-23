@@ -1,7 +1,8 @@
-import Button from '../Button'
+import { useEffect, useRef, useState } from 'react'
 import { Game } from '../../types/types'
 import Text from '../Text'
 import ButtonLiquid from '../ButtonLiquid'
+import GlassBubble from '../GlassBubble'
 
 type NavProps = {
 	gameStatus?: Game['status']
@@ -11,7 +12,40 @@ type NavProps = {
 }
 
 export default function Nav({ gameStatus, code, connected, onEndGame }: NavProps) {
-    const gameStatusDisplay = ['campaign', 'vote', 'results', 'decision', 'announcement']
+	const gameStatusDisplay: Game['status'][] = ['campaign', 'vote', 'results', 'decision', 'announcement']
+	const [displayedStatus, setDisplayedStatus] = useState<Game['status'] | undefined>(gameStatus)
+	const [statusPhase, setStatusPhase] = useState<'in' | 'out'>('in')
+	const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+	useEffect(() => {
+		if (gameStatus === displayedStatus) return
+
+		if (transitionTimeoutRef.current) {
+			clearTimeout(transitionTimeoutRef.current)
+		}
+
+		if (!displayedStatus) {
+			setDisplayedStatus(gameStatus)
+			setStatusPhase('in')
+			return
+		}
+
+		setStatusPhase('out')
+		transitionTimeoutRef.current = setTimeout(() => {
+			setDisplayedStatus(gameStatus)
+			setStatusPhase('out')
+			requestAnimationFrame(() => setStatusPhase('in'))
+		}, 220)
+	}, [gameStatus, displayedStatus])
+
+	useEffect(() => {
+		return () => {
+			if (transitionTimeoutRef.current) {
+				clearTimeout(transitionTimeoutRef.current)
+			}
+		}
+	}, [])
+
 	return (
 		<>
 			<div style={{
@@ -31,11 +65,26 @@ export default function Nav({ gameStatus, code, connected, onEndGame }: NavProps
 
                 <div style={{ flexDirection: 'row', display: 'flex', alignItems: 'center', gap: 16 }}>
 					{gameStatusDisplay.map((status) => (
-						<div style={{ padding: '8px 16px', borderRadius: '40px', backgroundColor: gameStatus === status ? 'var(--color-primary)' : 'transparent', boxShadow: gameStatus === status ? 'var(--shadow-soft)' : 'none' }} key={status}>
-                            <Text key={status} color={gameStatus === status ? 'surface-white' : 'text-secondary'} size={18} bold allCaps>
-                                {status}
-                            </Text>
-                        </div>
+						displayedStatus === status ? (
+							<GlassBubble
+								key={status}
+								style={{
+									padding: '8px 16px',
+									opacity: statusPhase === 'out' ? 0 : 1,
+									transition: 'opacity 220ms ease'
+								}}
+							>
+								<Text color="text-primary" size={18} bold allCaps>
+									{status}
+								</Text>
+							</GlassBubble>
+						) : (
+							<div style={{ padding: '8px 16px', borderRadius: '40px', backgroundColor: 'transparent', boxShadow: 'none' }} key={status}>
+								<Text color="text-secondary" size={18} bold allCaps>
+									{status}
+								</Text>
+							</div>
+						)
                     ))}
                 </div>
 

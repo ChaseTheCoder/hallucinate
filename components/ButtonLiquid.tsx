@@ -17,6 +17,7 @@ export default function ButtonLiquid({ href, children, onClick, disabled, style 
       <span className={styles.centerTone} aria-hidden="true" />
       <span className={styles.highlight} aria-hidden="true" />
       <span className={styles.shadow} aria-hidden="true" />
+      <span className={styles.textReflection} aria-hidden="true">{children}</span>
       <span className={styles.label}>{children}</span>
     </>
   )
