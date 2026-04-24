@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/router'
 import Lucin from '../components/Lucin'
-import Button from '../components/Button'
+import ButtonLiquid from '../components/ButtonLiquid'
 
 export default function Start() {
   const [isCreating, setIsCreating] = useState(false)
@@ -56,9 +56,9 @@ export default function Start() {
             fontSize: '16px'
           }}
         />
-        <Button onClick={handleStartGame} disabled={isCreating}>
+        <ButtonLiquid onClick={handleStartGame} disabled={isCreating}>
           {isCreating ? 'Starting...' : 'Start Game'}
-        </Button>
+        </ButtonLiquid>
       </div>
       {errorMessage ? (
         <p style={{ color: '#E03E3E', marginTop: 12 }}>{errorMessage}</p>

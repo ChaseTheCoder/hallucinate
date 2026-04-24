@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useRouter } from 'next/router'
-import Button from '../../components/Button'
+import ButtonLiquid from '../../components/ButtonLiquid'
 
 export default function Join() {
   const [code, setCode] = useState('')
@@ -50,7 +50,7 @@ export default function Join() {
             style={{width: '100%', padding: '10px', boxSizing: 'border-box'}}
           />
         </div>
-        <Button onClick={handleJoin}>Join Game</Button>
+        <ButtonLiquid onClick={handleJoin}>Join Game</ButtonLiquid>
       </form>
     </div>
   )

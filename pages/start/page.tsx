@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useRouter } from 'next/router'
-import Button from '../../components/Button'
+import ButtonLiquid from '../../components/ButtonLiquid'
 
 export default function Start() {
   const [creating, setCreating] = useState(false)
@@ -18,7 +18,7 @@ export default function Start() {
     <div style={{padding:24}}>
       <h2>Start Game</h2>
       <p>Click the button to create a game and get a join code.</p>
-      <Button onClick={createGame}>{creating ? 'Creating...' : 'Create Game'}</Button>
+      <ButtonLiquid onClick={createGame}>{creating ? 'Creating...' : 'Create Game'}</ButtonLiquid>
     </div>
   )
 }

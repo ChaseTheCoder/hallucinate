@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import io, { Socket } from 'socket.io-client'
-import Button from '../../components/Button'
+import ButtonLiquid from '../../components/ButtonLiquid'
 import VoteButton from '../../components/VoteButton'
 import VotePanel from '../../components/player/VotePanel'
 import { gameContent } from '../../content/content'
@@ -395,7 +395,7 @@ export default function PlayerPage() {
       >
         <h2>Game Not Found</h2>
         <p>The game code you're looking for doesn't exist.</p>
-        <Button onClick={() => router.push('/')}>Go Home</Button>
+        <ButtonLiquid onClick={() => router.push('/')}>Go Home</ButtonLiquid>
       </div>
     )
   }
@@ -478,7 +478,7 @@ export default function PlayerPage() {
             </span>
           )}
         </div>
-        <Button onClick={handleLeaveGame}>Leave Game</Button>
+        <ButtonLiquid onClick={handleLeaveGame}>Leave Game</ButtonLiquid>
       </div>
 
       {/* Main Content */}
@@ -559,7 +559,7 @@ export default function PlayerPage() {
                 backgroundColor: '#FFFFFF'
               }}
             >
-              <Button
+              <ButtonLiquid
                 onClick={handleSubmitDecision}
                 disabled={!decisionSelection || isSubmittingDecision}
                 style={{
@@ -569,7 +569,7 @@ export default function PlayerPage() {
                 }}
               >
                 {isSubmittingDecision ? 'Submitting...' : 'Submit Decision'}
-              </Button>
+              </ButtonLiquid>
             </div>
           </div>
         ) : (
@@ -611,13 +611,13 @@ export default function PlayerPage() {
                     width: '120px'
                   }}
                 />
-                <Button
+                <ButtonLiquid
                   onClick={handleStartGameClick}
                   disabled={allPlayers.length < 4}
                   style={{ marginTop: 12 }}
                 >
                   Start Game
-                </Button>
+                </ButtonLiquid>
                 {allPlayers.length < 4 && (
                   <p style={{
                     color: '#E03E3E',
@@ -642,7 +642,7 @@ export default function PlayerPage() {
                 >
                   {gameContent.join.hostAction}
                 </p>
-                <Button onClick={handleStartGameClick}>Next</Button>
+                <ButtonLiquid onClick={handleStartGameClick}>Next</ButtonLiquid>
               </>
             )}
           </div>

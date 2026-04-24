@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import ButtonLiquid from './ButtonLiquid'
 
 type VoteButtonProps = {
   label: string
@@ -9,27 +10,19 @@ type VoteButtonProps = {
 
 export default function VoteButton({ label, selected = false, onClick, rightContent }: VoteButtonProps) {
   return (
-    <button
-      type="button"
-      className="button"
+    <ButtonLiquid
       onClick={onClick}
       style={{
         width: '100%',
         padding: '16px 20px',
-        backgroundColor: selected ? 'var(--color-primary)' : 'transparent',
-        color: selected ? 'var(--color-white)' : 'var(--color-text-primary)',
-        border: `1px solid ${selected ? 'var(--color-primary)' : 'var(--color-border-accent)'}`,
-        borderRadius: 40,
-        fontSize: '1em',
-        fontWeight: selected ? 700 : 500,
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        textAlign: 'left'
+        opacity: selected ? 1 : 0.9,
+        transition: 'opacity 0.2s ease'
       }}
     >
-      <span>{label}</span>
-      {rightContent ?? null}
-    </button>
+      <span style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', textAlign: 'left', fontWeight: selected ? 700 : 500 }}>
+        <span style={{ textAlign: 'left' }}>{label}</span>
+        {rightContent ?? null}
+      </span>
+    </ButtonLiquid>
   )
 }

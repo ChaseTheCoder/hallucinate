@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
-import Button from '../Button';
+import ButtonLiquid from '../ButtonLiquid'
 import VoteButton from '../VoteButton'
-import { Player } from '../../types/types';
+import { Player } from '../../types/types'
 
 interface VotePanelProps {
   currentPlayer: Player
@@ -12,9 +12,9 @@ interface VotePanelProps {
 }
 
 type VoteSelection = {
-  first?: string  // 5 points
+  first?: string // 5 points
   second?: string // 3 points
-  third?: string  // 1 point
+  third?: string // 1 point
 }
 
 const VOTE_VALUES = { first: 5, second: 3, third: 1 }
@@ -165,21 +165,17 @@ export default function VotePanel({
               rightContent={voteValue ? (
                 <span
                   style={{
-                    backgroundColor: votePosition === 'first' ? 'var(--color-accent-line)' : votePosition === 'second' ? 'var(--color-text-secondary)' : 'var(--color-background)',
-                    color: votePosition === 'first' ? 'var(--color-white)' : 'var(--color-text-primary)',
-                    padding: '4px 12px',
-                    borderRadius: 12,
-                    fontSize: '0.9em',
-                    fontWeight: 'bold',
-                    minWidth: '40px',
-                    textAlign: 'center'
+                    color: 'var(--color-text-primary)',
+                    fontSize: '0.95em',
+                    fontWeight: 700,
+                    minWidth: '32px',
+                    textAlign: 'right'
                   }}
                 >
                   {voteValue}
                 </span>
               ) : null}
-            >
-            </VoteButton>
+            />
           )
         })}
       </div>
@@ -196,7 +192,7 @@ export default function VotePanel({
           backgroundColor: '#FFFFFF'
         }}
       >
-        <Button
+        <ButtonLiquid
           onClick={handleSubmitVote}
           disabled={!isVoteComplete || isSubmitting}
           style={{
@@ -205,8 +201,8 @@ export default function VotePanel({
             cursor: isVoteComplete ? 'pointer' : 'not-allowed'
           }}
         >
-          {isSubmitting ? 'Submitting...' : 'Submit Vote'}
-        </Button>
+          {isSubmitting ? 'Submitting Votes...' : `Submit Votes (${selectedCount}/${requiredVotes})`}
+        </ButtonLiquid>
       </div>
     </div>
   )

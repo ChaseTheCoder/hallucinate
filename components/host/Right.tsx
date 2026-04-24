@@ -15,7 +15,7 @@ export default function Right({ qualifiedPlayers = [], sortedBarredPlayers = [],
 			display: 'flex',
 			flexDirection: 'column',
 			flex: 4,
-			gap: 24,
+			gap: 12,
 			width: '30%',
 			height: '100%'
 		}}>
@@ -26,11 +26,10 @@ export default function Right({ qualifiedPlayers = [], sortedBarredPlayers = [],
 				style={{
                     display: 'flex',
 					flexDirection: 'column',
-					gap: 12,
+					gap: 6,
 					width: '100%'
 				}}
 			>
-                <LineBreak />
 				{qualifiedPlayers?.length === 0 ? (
 					<p style={{ textAlign: 'center', color: '#5A5A5A' }}>
 						No players have joined yet
@@ -52,11 +51,10 @@ export default function Right({ qualifiedPlayers = [], sortedBarredPlayers = [],
 				style={{
 					display: 'flex',
 					flexDirection: 'column',
-					gap: 12,
+					gap: 6,
 					width: '100%'
 				}}
 			>
-                <LineBreak />
                 {sortedBarredPlayers.map((player) => (
                     <CandidateListItem
                         key={player.id}
