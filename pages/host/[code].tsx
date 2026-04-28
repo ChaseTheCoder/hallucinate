@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/router'
 import io, { Socket } from 'socket.io-client'
 import Lucin from '../../components/Lucin'
@@ -43,6 +43,24 @@ export default function HostPage() {
   const [audioRetryTick, setAudioRetryTick] = useState(0)
   const [audioDebugMessage, setAudioDebugMessage] = useState<string | null>(null)
   const narrationAudioRef = useRef<HTMLAudioElement | null>(null)
+  const hasAutoTransitionedFromRulesRef = useRef(false)
+  const hasAutoTransitionedFromResultsRef = useRef(false)
+  const hasAutoTransitionedFromAnnouncementRef = useRef(false)
+
+  const handleTransition = useCallback(async () => {
+    if (!gameCode) return
+    try {
+      const res = await fetch(`/api/game/${gameCode}/update`, {
+        method: 'PATCH'
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || 'Failed to transition')
+      }
+    } catch (error) {
+      console.error('Error transitioning:', error)
+    }
+  }, [gameCode])
 
   // socket connection and game state management
   useEffect(() => {
@@ -262,6 +280,10 @@ export default function HostPage() {
     }
   }, [game?.status])
 
+  const isResultsLeaderRevealed = game?.status === 'results'
+    && Array.isArray(content?.hostMessage)
+    && messageIndex >= content.hostMessage.length - 1
+
   // Play narration for each indexed host message and only advance after playback ends.
   useEffect(() => {
     if (!game?.status || !Array.isArray(content?.hostMessage) || messageIndex >= content.hostMessage.length) return
@@ -273,6 +295,24 @@ export default function HostPage() {
     let isCancelled = false
     let fallbackTimeout: ReturnType<typeof setTimeout> | null = null
 
+    const triggerRulesToCampaign = () => {
+      if (game.status !== 'rules' || hasAutoTransitionedFromRulesRef.current) return
+      hasAutoTransitionedFromRulesRef.current = true
+      handleTransition()
+    }
+
+    const triggerResultsToDecision = () => {
+      if (game.status !== 'results' || hasAutoTransitionedFromResultsRef.current) return
+      hasAutoTransitionedFromResultsRef.current = true
+      handleTransition()
+    }
+
+    const triggerAnnouncementToNext = () => {
+      if (game.status !== 'announcement' || hasAutoTransitionedFromAnnouncementRef.current) return
+      hasAutoTransitionedFromAnnouncementRef.current = true
+      handleTransition()
+    }
+
     if (narrationAudioRef.current) {
       narrationAudioRef.current.pause()
       narrationAudioRef.current = null
@@ -282,9 +322,27 @@ export default function HostPage() {
       setAudioDebugMessage(null)
       setAutoplayBlocked(false)
       fallbackTimeout = setTimeout(() => {
-        if (!isCancelled && !isLastMessage) {
-          setMessageIndex(prev => prev + 1)
+        if (isCancelled) return
+        if (isLastMessage) {
+          if (game.status === 'rules') {
+            triggerRulesToCampaign()
+            return
+          }
+          if (game.status === 'results') {
+            fallbackTimeout = setTimeout(() => {
+              if (!isCancelled) {
+                triggerResultsToDecision()
+              }
+            }, 5000)
+            return
+          }
+          if (game.status === 'announcement') {
+            triggerAnnouncementToNext()
+            return
+          }
+          return
         }
+        setMessageIndex(prev => prev + 1)
       }, delayMs)
 
       return () => {
@@ -301,7 +359,32 @@ export default function HostPage() {
 
     const handleEnded = () => {
       if (isCancelled) return
-      if (isLastMessage) return
+      if (isLastMessage) {
+        if (game.status === 'results') {
+          fallbackTimeout = setTimeout(() => {
+            if (!isCancelled) {
+              triggerResultsToDecision()
+            }
+          }, 5000)
+          return
+        }
+        if (game.status === 'announcement') {
+          fallbackTimeout = setTimeout(() => {
+            if (!isCancelled) {
+              triggerAnnouncementToNext()
+            }
+          }, delayMs)
+          return
+        }
+        if (game.status === 'rules') {
+          fallbackTimeout = setTimeout(() => {
+            if (!isCancelled) {
+              triggerRulesToCampaign()
+            }
+          }, delayMs)
+        }
+        return
+      }
       fallbackTimeout = setTimeout(() => {
         if (!isCancelled) {
           setMessageIndex(prev => prev + 1)
@@ -311,7 +394,32 @@ export default function HostPage() {
 
     const handleError = () => {
       if (isCancelled) return
-      if (isLastMessage) return
+      if (isLastMessage) {
+        if (game.status === 'results') {
+          fallbackTimeout = setTimeout(() => {
+            if (!isCancelled) {
+              triggerResultsToDecision()
+            }
+          }, 5000)
+          return
+        }
+        if (game.status === 'announcement') {
+          fallbackTimeout = setTimeout(() => {
+            if (!isCancelled) {
+              triggerAnnouncementToNext()
+            }
+          }, delayMs)
+          return
+        }
+        if (game.status === 'rules') {
+          fallbackTimeout = setTimeout(() => {
+            if (!isCancelled) {
+              triggerRulesToCampaign()
+            }
+          }, delayMs)
+        }
+        return
+      }
       fallbackTimeout = setTimeout(() => {
         if (!isCancelled) {
           setMessageIndex(prev => prev + 1)
@@ -327,6 +435,20 @@ export default function HostPage() {
       if (err?.name === 'NotAllowedError') {
         setAutoplayBlocked(true)
         setAudioDebugMessage('Browser blocked autoplay. Audio will auto-retry on the next user interaction.')
+        if (isLastMessage && game.status === 'results') {
+          fallbackTimeout = setTimeout(() => {
+            if (!isCancelled) {
+              triggerResultsToDecision()
+            }
+          }, 5000)
+        }
+        if (isLastMessage && game.status === 'announcement') {
+          fallbackTimeout = setTimeout(() => {
+            if (!isCancelled) {
+              triggerAnnouncementToNext()
+            }
+          }, delayMs)
+        }
         return
       }
       handleError()
@@ -342,7 +464,7 @@ export default function HostPage() {
         narrationAudioRef.current = null
       }
     }
-  }, [game?.status, content?.hostMessage, messageIndex, audioRetryTick])
+  }, [game?.status, content?.hostMessage, messageIndex, audioRetryTick, handleTransition])
 
   useEffect(() => {
     if (!autoplayBlocked) return
@@ -422,12 +544,30 @@ export default function HostPage() {
     updateRemaining()
     const interval = setInterval(updateRemaining, 1000)
     return () => clearInterval(interval)
-  }, [game?.status, game?.electionCycleStartTime, game?.cycleTime])
+  }, [game?.status, game?.electionCycleStartTime, game?.cycleTime, handleTransition])
 
   // Reset transition flag when entering campaign
   useEffect(() => {
     if (game?.status === 'campaign') {
       hasTransitionedRef.current = false
+    }
+  }, [game?.status])
+
+  useEffect(() => {
+    if (game?.status === 'rules') {
+      hasAutoTransitionedFromRulesRef.current = false
+    }
+  }, [game?.status])
+
+  useEffect(() => {
+    if (game?.status === 'results') {
+      hasAutoTransitionedFromResultsRef.current = false
+    }
+  }, [game?.status])
+
+  useEffect(() => {
+    if (game?.status === 'announcement') {
+      hasAutoTransitionedFromAnnouncementRef.current = false
     }
   }, [game?.status])
 
@@ -449,21 +589,6 @@ export default function HostPage() {
     } catch (error) {
       console.error('Error ending game:', error)
       alert('Failed to end game')
-    }
-  }
-
-  const handleTransition = async () => {
-    if (!gameCode) return
-    try {
-      const res = await fetch(`/api/game/${gameCode}/update`, {
-        method: 'PATCH'
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || 'Failed to transition')
-      }
-    } catch (error) {
-      console.error('Error transitioning:', error)
     }
   }
 
@@ -535,6 +660,7 @@ export default function HostPage() {
           qualifiedPlayers={qualifiedPlayers}
           sortedBarredPlayers={sortedBarredPlayers}
           gameStatus={game?.status}
+          isResultsLeaderRevealed={isResultsLeaderRevealed}
         />
       </div>
     </div>

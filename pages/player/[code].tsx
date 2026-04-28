@@ -416,8 +416,7 @@ export default function PlayerPage() {
         display: 'flex',
         flexDirection: 'column',
         minHeight: '100vh',
-        padding: 24,
-        gap: 32
+        gap: 12
       }}
     >
       {/* Connection Status Indicator - Mobile Resilience Feedback */}
@@ -628,21 +627,6 @@ export default function PlayerPage() {
                     Need at least 4 players to start ({allPlayers.length}/4)
                   </p>
                 )}
-              </>
-            )}
-            {isAdmin && (gameStatus !== 'join' || cycleTimeSet) && gameStatus !== 'campaign' && gameStatus !== 'final' && (
-              <>
-                <p
-                  style={{
-                    color: '#5A5A5A',
-                    textAlign: 'center',
-                    marginTop: 12,
-                    paddingTop: 36
-                  }}
-                >
-                  {gameContent.join.hostAction}
-                </p>
-                <ButtonLiquid onClick={handleStartGameClick}>Next</ButtonLiquid>
               </>
             )}
           </div>

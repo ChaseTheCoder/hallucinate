@@ -110,7 +110,7 @@ export default function VotePanel({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 24,
+        gap: 8,
         width: '100%',
         height: '100%'
       }}
@@ -118,12 +118,6 @@ export default function VotePanel({
       {/* Header */}
       <div style={{ textAlign: 'center' }}>
         <h2 style={{ color: '#5A5A5A', margin: '0 0 8px 0' }}>Cast Your Votes</h2>
-        <p style={{ color: '#999', margin: 0, fontSize: '0.9em' }}>
-          Select your top {requiredVotes} candidate{requiredVotes > 1 ? 's' : ''} ({requiredVotes === 3 ? '5, 3, 1' : requiredVotes === 2 ? '5, 3' : '5'} points)
-        </p>
-        <p style={{ color: '#5A5A5A', margin: '8px 0 0 0', fontWeight: 'bold' }}>
-          {selectedCount}/{requiredVotes} Selected
-        </p>
       </div>
 
       {/* Error message */}
@@ -147,7 +141,7 @@ export default function VotePanel({
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: 12,
+          gap: 8,
           flex: 1,
           overflowY: 'auto'
         }}
@@ -187,9 +181,7 @@ export default function VotePanel({
           marginLeft: 'calc(-50vw + 50%)',
           marginRight: 'calc(-50vw + 50%)',
           marginBottom: -24,
-          padding: '16px 24px',
-          borderTop: '1px solid #E0E0E0',
-          backgroundColor: '#FFFFFF'
+          padding: '16px 24px 24px 24px',
         }}
       >
         <ButtonLiquid

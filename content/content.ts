@@ -61,7 +61,7 @@ export const gameContent = {
     playerMessage: "Waiting for a decision from your leader",
     hostMessage: [
       "Newly elected leader, please choose one fellow candidate to join you in the decision room. Or choose to go alone.",
-      "Everyone else may wait pateintly as your leader makes their executive decisions.",
+      "Everyone else may wait patiently as your leader makes their executive decisions.",
     ],
     leaderAction: "Submit Decision"
   },
