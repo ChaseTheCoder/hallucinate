@@ -78,7 +78,6 @@ export const gameContent = {
     playerMessage: "The final election is complete! See the results on the host screen.",
     hostMessage: [
       "The final votes have been submitted and I have tallied the results.",
-      "With a total of {WINNER_POINTS} points to the {LOSER_POINTS} points",
       "the winner of Hallucinate is...",
       "{WINNER_NAME}"
     ],

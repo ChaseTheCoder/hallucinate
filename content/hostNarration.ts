@@ -47,6 +47,27 @@ function asHostMessages(value: unknown): string[] {
   return value.filter((part): part is string => typeof part === 'string')
 }
 
+function computePauseMs(status: StatusTypes, index: number, total: number, id: string): number {
+  if (DRAMATIC_PAUSE_OVERRIDES_MS[id] !== undefined) {
+    return DRAMATIC_PAUSE_OVERRIDES_MS[id]
+  }
+
+  const isLast = index === total - 1
+  const isSecondToLast = index === total - 2
+
+  // Final winner reveal — stay on screen indefinitely until host ends game
+  if (status === 'final' && isLast) {
+    return Infinity
+  }
+
+  // Dramatic pause before leader/winner name is revealed
+  if ((status === 'results' || status === 'announcement' || status === 'final') && (isSecondToLast || isLast)) {
+    return 8000
+  }
+
+  return DEFAULT_HOST_PAUSE_MS
+}
+
 export function getHostNarrationSegments(status: StatusTypes): HostNarrationSegment[] {
   const hostMessages = asHostMessages(gameContent[status]?.hostMessage)
 
@@ -60,7 +81,7 @@ export function getHostNarrationSegments(status: StatusTypes): HostNarrationSegm
       text,
       audioObjectKey,
       audioUrl: buildAudioUrl(audioObjectKey),
-      pauseAfterMs: DRAMATIC_PAUSE_OVERRIDES_MS[id] ?? DEFAULT_HOST_PAUSE_MS,
+      pauseAfterMs: computePauseMs(status, index, hostMessages.length, id),
       hasDynamicTokens: text.includes('{') && text.includes('}')
     }
   })

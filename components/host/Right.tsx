@@ -7,16 +7,17 @@ type RightProps = {
 	qualifiedPlayers?: Game['players']
 	sortedBarredPlayers?: Game['players']
 	gameStatus?: Game['status']
-	isResultsLeaderRevealed?: boolean
+	isLeaderRevealed?: boolean
 }
 
 export default function Right({
 	qualifiedPlayers = [],
 	sortedBarredPlayers = [],
 	gameStatus,
-	isResultsLeaderRevealed = false
+	isLeaderRevealed = false
 }: RightProps = {}) {
 	const [displayVoteMap, setDisplayVoteMap] = useState<Record<string, number>>({})
+	const [revealedVoteMap, setRevealedVoteMap] = useState<Record<string, number>>({})
 	const [qualifiedOrderIds, setQualifiedOrderIds] = useState<string[]>([])
 	const itemRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -26,7 +27,7 @@ export default function Right({
 	)
 
 	const targetOrderIds = useMemo(() => {
-		if (gameStatus === 'results' && isResultsLeaderRevealed) {
+		if ((gameStatus === 'results' || gameStatus === 'final') && isLeaderRevealed) {
 			return [...qualifiedPlayers]
 				.sort((a, b) => {
 					if (a.leader && !b.leader) return -1
@@ -36,17 +37,39 @@ export default function Right({
 				.map(player => player.id)
 		}
 
+		if (Object.keys(revealedVoteMap).length > 0) {
+			const qualifiedIds = qualifiedPlayers.map(player => player.id)
+			const qualifiedSet = new Set(qualifiedIds)
+			const validCurrent = qualifiedOrderIds.filter(id => qualifiedSet.has(id))
+			const added = qualifiedIds.filter(id => !qualifiedOrderIds.includes(id))
+			return [...validCurrent, ...added]
+		}
+
 		return qualifiedPlayers.map(player => player.id)
-	}, [qualifiedPlayers, gameStatus, isResultsLeaderRevealed])
+	}, [qualifiedPlayers, gameStatus, isLeaderRevealed, revealedVoteMap])
 
 	useEffect(() => {
-		if (gameStatus !== 'results') {
-			setDisplayVoteMap(Object.fromEntries(qualifiedPlayers.map(player => [player.id, player.votes])))
+		if (gameStatus !== 'results' && gameStatus !== 'final') {
+			setDisplayVoteMap(() => {
+				const next: Record<string, number> = {}
+				qualifiedPlayers.forEach(player => {
+					const rememberedVotes = revealedVoteMap[player.id]
+					if (rememberedVotes !== undefined) {
+						next[player.id] = rememberedVotes
+					}
+				})
+				return next
+			})
 			return
 		}
 
-		if (isResultsLeaderRevealed) {
-			setDisplayVoteMap(Object.fromEntries(qualifiedPlayers.map(player => [player.id, player.votes])))
+		if (isLeaderRevealed) {
+			const revealedVotes = Object.fromEntries(qualifiedPlayers.map(player => [player.id, player.votes]))
+			const hasNewData = qualifiedPlayers.some(p => revealedVoteMap[p.id] !== p.votes)
+			if (hasNewData) {
+				setRevealedVoteMap(prev => ({ ...prev, ...revealedVotes }))
+				setDisplayVoteMap(revealedVotes)
+			}
 			return
 		}
 
@@ -62,7 +85,7 @@ export default function Right({
 		}, 80)
 
 		return () => clearInterval(interval)
-	}, [qualifiedPlayers, gameStatus, isResultsLeaderRevealed])
+	}, [qualifiedPlayers, gameStatus, isLeaderRevealed, revealedVoteMap])
 
 	useEffect(() => {
 		if (qualifiedOrderIds.length === 0) {
@@ -77,7 +100,7 @@ export default function Right({
 
 		// During the results scramble phase keep names in their current positions.
 		// Only add/remove players who joined or left the qualified list.
-		if (gameStatus === 'results' && !isResultsLeaderRevealed) {
+		if ((gameStatus === 'results' || gameStatus === 'final') && !isLeaderRevealed) {
 			const targetSet = new Set(targetOrderIds)
 			const validCurrent = qualifiedOrderIds.filter(id => targetSet.has(id))
 			const added = targetOrderIds.filter(id => !qualifiedOrderIds.includes(id))
@@ -113,7 +136,7 @@ export default function Right({
 				element.style.transform = 'translateY(0)'
 			})
 		})
-	}, [targetOrderIds, qualifiedOrderIds, gameStatus, isResultsLeaderRevealed])
+	}, [targetOrderIds, qualifiedOrderIds, gameStatus, isLeaderRevealed])
 
 	const orderedQualifiedPlayers = qualifiedOrderIds
 		.map(id => qualifiedById[id])
@@ -153,8 +176,9 @@ export default function Right({
 						>
 							<CandidateListItem
 								player={player}
-								showVotes={gameStatus === 'results'}
+							showVotes={(gameStatus === 'results' || gameStatus === 'final') || displayVoteMap[player.id] !== undefined}
 								displayVotes={displayVoteMap[player.id]}
+								isLeaderRevealed={isLeaderRevealed}
 							/>
 						</div>
 					))
