@@ -1,7 +1,11 @@
 export const gameContent = {
   join: {
     playerMessage: "Waiting for fellow candidates to join...",
-    hostMessage: ["Welcome to Hallucinate. Enter the game code and your real name on your device to join."],
+    hostMessage: [
+      "Welcome to Hallucinate.",
+      "Please circle around me so others cannot see your screen.",
+      "Enter the game code and your full name on your device to join."
+    ],
     hostAction: "If you see all intended representatives on the host screen then..."
   },
   rules: {
@@ -38,7 +42,10 @@ export const gameContent = {
   },
   campaign: {
     playerMessage: "Campaign and strategize.",
-    hostMessage: ["{TIME} minutes until next election."],
+    hostMessage: [
+      "{TIME}",
+      "until next election."
+    ],
     hostAction: null
   },
   vote: {

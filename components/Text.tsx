@@ -50,7 +50,7 @@ export default function Text({
 }: TextProps) {
 	const textStyle: CSSProperties = {
 		color: tokenToCssVariable[color],
-		fontSize: typeof size === 'number' ? `${size}px` : size,
+		fontSize: typeof size === 'number' ? `${size}rem` : size,
 		fontWeight: bold ? 700 : undefined,
 		textTransform: allCaps ? 'uppercase' : undefined,
 		...style

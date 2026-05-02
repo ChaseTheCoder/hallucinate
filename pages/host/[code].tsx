@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import Text from '../../components/Text'
 import { useRouter } from 'next/router'
 import io, { Socket } from 'socket.io-client'
 import Lucin from '../../components/Lucin'
@@ -39,11 +40,15 @@ export default function HostPage() {
   const [loserPoints, setLoserPoints] = useState<number>(0)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [latestBarredName, setLatestBarredName] = useState<string | null>(null)
-  const [currentHostMessage, setCurrentHostMessage] = useState<string>('Loading...')
+  const [displayedHostMessages, setDisplayedHostMessages] = useState<string[]>(['Loading...'])
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [audioRetryTick, setAudioRetryTick] = useState(0)
   const [audioDebugMessage, setAudioDebugMessage] = useState<string | null>(null)
+  const [audioAmplitude, setAudioAmplitude] = useState<number>(0)
   const narrationAudioRef = useRef<HTMLAudioElement | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
   const autoTransitionedStatusRef = useRef<Game['status'] | null>(null)
 
   const handleTransition = useCallback(async () => {
@@ -101,6 +106,7 @@ export default function HostPage() {
     const handleGameStateUpdate = (data: Game) => {
       console.log('Game state update received:', data)
       setGame(data)
+      setLoadError(null)
 
       if (data.currentBarredPlayerIds && data.currentBarredPlayerIds.length > 0) {
         const latestBarredId = data.currentBarredPlayerIds[data.currentBarredPlayerIds.length - 1]
@@ -137,8 +143,12 @@ export default function HostPage() {
     socket.on('game-complete', handleGameComplete)
     socket.on('game-deleted', handleGameDeleted)
 
+    // If socket is already connected (e.g., after page refresh), trigger handleConnect
     if (socket.connected) {
+      console.log('[Socket] Already connected on mount, subscribing to game')
       handleConnect()
+    } else {
+      console.log('[Socket] Not connected on mount, waiting for connect event')
     }
 
     return () => {
@@ -157,6 +167,7 @@ export default function HostPage() {
   useEffect(() => {
     if (!gameCode || game || didLoadAttempted) return
 
+    console.log('[Host] Fetching initial game state for code:', gameCode)
     setDidLoadAttempted(true)
     setLoadError(null)
     fetch(`/api/game/${gameCode}`, { cache: 'no-store' })
@@ -335,21 +346,68 @@ export default function HostPage() {
     const audio = new Audio(segment.audioUrl)
     narrationAudioRef.current = audio
     audio.preload = 'auto'
+    audio.crossOrigin = 'anonymous'
     setAudioDebugMessage(null)
     setAutoplayBlocked(false)
 
+    // Set up Web Audio API for volume analysis
+    const setupAudioAnalysis = () => {
+      try {
+        if (!audioContextRef.current) {
+          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+        }
+        
+        const audioContext = audioContextRef.current
+        const analyser = audioContext.createAnalyser()
+        analyser.fftSize = 256
+        analyser.smoothingTimeConstant = 0.6
+        analyserRef.current = analyser
+
+        const source = audioContext.createMediaElementSource(audio)
+        source.connect(analyser)
+        analyser.connect(audioContext.destination)
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount)
+        
+        const updateAmplitude = () => {
+          if (isCancelled) return
+          
+          analyser.getByteFrequencyData(dataArray)
+          const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length
+          // Moderate amplitude response with a power curve
+          const normalizedAmplitude = Math.pow(average / 255, 0.85)
+          setAudioAmplitude(normalizedAmplitude)
+          
+          animationFrameRef.current = requestAnimationFrame(updateAmplitude)
+        }
+        
+        updateAmplitude()
+      } catch (error) {
+        console.warn('Audio analysis setup failed:', error)
+      }
+    }
+
     const handleEnded = () => {
       if (isCancelled) return
+      setAudioAmplitude(0)
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
       resolveSegment()
     }
 
     const handleError = () => {
       if (isCancelled) return
+      setAudioAmplitude(0)
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
       resolveSegment()
     }
 
     audio.addEventListener('ended', handleEnded)
     audio.addEventListener('error', handleError)
+    audio.addEventListener('canplay', setupAudioAnalysis, { once: true })
 
     audio.play().catch((error: unknown) => {
       const err = error as { name?: string }
@@ -368,6 +426,10 @@ export default function HostPage() {
       audio.removeEventListener('ended', handleEnded)
       audio.removeEventListener('error', handleError)
       if (fallbackTimeout) clearTimeout(fallbackTimeout)
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+      setAudioAmplitude(0)
       if (narrationAudioRef.current === audio) {
         narrationAudioRef.current = null
       }
@@ -395,29 +457,48 @@ export default function HostPage() {
   }, [autoplayBlocked])
 
   useEffect(() => {
-    let nextMessage = loadError
-      ? loadError
-      : isLoading
-        ? 'Loading...'
-        : 'Waiting...'
-
-    if (content?.hostMessage) {
-      const messageText = Array.isArray(content.hostMessage)
-        ? (content.hostMessage[messageIndex] || '')
-        : content.hostMessage
-
-      nextMessage = messageText
-        .replace('{LEADER_NAME}', leaderName || 'TBD')
-        .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
-        .replace('{TIME}', timeRemaining || 'TBD')
-        .replace('{VOTE_PROGRESS}', voteProgress || '0/0')
-        .replace('{WINNER_NAME}', winnerName)
-        .replace('{WINNER_POINTS}', winnerPoints.toString())
-        .replace('{LOSER_POINTS}', loserPoints.toString())
+    if (loadError) {
+      setDisplayedHostMessages([loadError])
+      return
     }
 
-    setCurrentHostMessage(nextMessage)
+    if (isLoading) {
+      setDisplayedHostMessages(['Loading...'])
+      return
+    }
+
+    if (!content?.hostMessage) {
+      setDisplayedHostMessages(['Waiting...'])
+      return
+    }
+
+    if (Array.isArray(content.hostMessage)) {
+      // For 'rules' status, find the most recent "Phase" message and only show from there
+      let startIndex = 0
+      if (game?.status === 'rules') {
+        for (let i = messageIndex; i >= 0; i--) {
+          if (content.hostMessage[i]?.startsWith('Phase')) {
+            startIndex = i
+            break
+          }
+        }
+      }
+
+      // Build array of messages from startIndex to current messageIndex
+      const messages = content.hostMessage.slice(startIndex, messageIndex + 1).map(msg => 
+        msg
+          .replace('{LEADER_NAME}', leaderName || 'TBD')
+          .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
+          .replace('{TIME}', timeRemaining || 'TBD')
+          .replace('{VOTE_PROGRESS}', voteProgress || '0/0')
+          .replace('{WINNER_NAME}', winnerName)
+          .replace('{WINNER_POINTS}', winnerPoints.toString())
+          .replace('{LOSER_POINTS}', loserPoints.toString())
+      )
+      setDisplayedHostMessages(messages)
+    }
   }, [
+    game?.status,
     loadError,
     isLoading,
     content,
@@ -484,6 +565,11 @@ export default function HostPage() {
     }
   }
 
+  const shouldMessageBeBold = (status: Game['status'] | undefined, message: string, index: number): boolean => {
+    if (status === 'join' && index === 0) return true
+    return message.startsWith('Phase')
+  }
+
   if (!gameCode) return <div style={{ padding: 24 }}>Loading...</div>
 
   return (
@@ -513,26 +599,48 @@ export default function HostPage() {
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center',
           width: '70%',
-          gap: 20,
           height: '100%',
-          position: 'relative'
+          position: 'relative',
+          paddingTop: '15%'
         }}>
-          <Lucin height='40vh'/>
-          <p style={{ textAlign: 'center', fontSize: '1.2em', maxWidth: '80%' }}>
-            {currentHostMessage}
-          </p>
-          {audioDebugMessage ? (
-            <p style={{ textAlign: 'center', color: '#E03E3E', marginTop: 8, fontSize: '0.9em', maxWidth: '80%' }}>
-              {audioDebugMessage}
-            </p>
-          ) : null}
-          {loadError ? (
-            <p style={{ textAlign: 'center', color: '#E03E3E', marginTop: 12 }}>
-              Please refresh or check the game code.
-            </p>
-          ) : null}
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            height: '60%',
+            aspectRatio: '1 / 1',
+            zIndex: 0,
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center'
+          }}>
+            <Lucin height='100%' amplitude={audioAmplitude}/>
+          </div>
+          <div style={{
+            position: 'relative',
+            zIndex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: 8,
+            width: '80%'
+          }}>
+            {displayedHostMessages.map((message, index) => {
+              const isBold = shouldMessageBeBold(game?.status, message, index)
+              return (
+                <Text key={index} size={isBold ? 1.75 : 1.5} color='text-primary' bold={isBold} style={{ marginBottom: index < displayedHostMessages.length - 1 ? '0.5rem' : 0 }}>
+                  {message}
+                </Text>
+              )
+            })}
+            {loadError ? (
+              <p style={{ textAlign: 'center', color: '#E03E3E', marginTop: 12 }}>
+                Please refresh or check the game code.
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <Right

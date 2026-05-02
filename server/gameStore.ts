@@ -21,6 +21,7 @@ async function ensureDbReady() {
   if (!pool || dbReady || dbDisabledForSession) return
 
   try {
+    console.log('[GameStore] Initializing database connection...')
     await pool.query(
       `
         CREATE TABLE IF NOT EXISTS games_state (
@@ -30,6 +31,7 @@ async function ensureDbReady() {
         )
       `
     )
+    console.log('[GameStore] Database connection established and table ensured')
   } catch (error: unknown) {
     const err = error as { code?: string; hostname?: string; message?: string }
     if (err?.code === 'ENOTFOUND' && process.env.NODE_ENV === 'development') {
@@ -41,6 +43,7 @@ async function ensureDbReady() {
       )
       return
     }
+    console.error('[GameStore] Database initialization error:', err)
     throw error
   }
 
@@ -93,20 +96,36 @@ export async function createGame(): Promise<Game> {
 }
 
 export async function persistGame(game: Game): Promise<void> {
+  // CRITICAL: Store by ID in memory first before DB persist
   games[game.id] = game
+  console.log(`[GameStore] Persisting game ${game.code} (${game.id}) with ${game.players.length} players, status: ${game.status}`)
 
-  if (!pool || dbDisabledForSession) return
+  if (!pool || dbDisabledForSession) {
+    console.log(`[GameStore] Skipping database persist for ${game.code} (pool: ${!!pool}, dbDisabled: ${dbDisabledForSession})`)
+    return
+  }
+  
   await ensureDbReady()
-  if (dbDisabledForSession) return
-  await pool.query(
-    `
-      INSERT INTO games_state (code, payload, updated_at)
-      VALUES ($1, $2::jsonb, NOW())
-      ON CONFLICT (code)
-      DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
-    `,
-    [game.code, JSON.stringify(game)]
-  )
+  if (dbDisabledForSession) {
+    console.log(`[GameStore] Database disabled, skipping persist for ${game.code}`)
+    return
+  }
+  
+  try {
+    await pool.query(
+      `
+        INSERT INTO games_state (code, payload, updated_at)
+        VALUES ($1, $2::jsonb, NOW())
+        ON CONFLICT (code)
+        DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+      `,
+      [game.code, JSON.stringify(game)]
+    )
+    console.log(`[GameStore] Successfully persisted game ${game.code} to database`)
+  } catch (error) {
+    console.error(`[GameStore] Failed to persist game ${game.code} to database:`, error)
+    throw error
+  }
 }
 
 export async function deletePersistedGame(code: string): Promise<void> {
@@ -130,7 +149,7 @@ function normalizeLoadedGame(raw: unknown): Game | null {
     ...g,
     players: Array.isArray(g.players) ? g.players : [],
     rounds: Array.isArray(g.rounds) ? g.rounds : [],
-    status: g.status || 'join',
+    status: g.status ?? 'join',
     cycleTime: typeof g.cycleTime === 'number' ? g.cycleTime : 60,
     currentRound: typeof g.currentRound === 'number' ? g.currentRound : 0,
     electionCycleStartTime: typeof g.electionCycleStartTime === 'number' ? g.electionCycleStartTime : 0,
@@ -139,20 +158,41 @@ function normalizeLoadedGame(raw: unknown): Game | null {
 }
 
 export async function findGameByCode(code: string): Promise<Game | null> {
+  console.log(`[GameStore] findGameByCode called for ${code}, checking ${Object.keys(games).length} games in memory`)
+  
   const inMemory = Object.values(games).find(g => g.code === code)
-  if (inMemory) return inMemory
+  if (inMemory) {
+    console.log(`[GameStore] Found game ${code} (ID: ${inMemory.id}) in memory with ${inMemory.players.length} players, status: ${inMemory.status}`)
+    return inMemory
+  }
 
-  if (!pool || dbDisabledForSession) return null
+  console.log(`[GameStore] Game ${code} not in memory, checking database...`)
+
+  if (!pool || dbDisabledForSession) {
+    console.log(`[GameStore] Database unavailable for game ${code} (pool: ${!!pool}, dbDisabled: ${dbDisabledForSession})`)
+    return null
+  }
 
   await ensureDbReady()
-  if (dbDisabledForSession) return null
+  if (dbDisabledForSession) {
+    console.log(`[GameStore] Database disabled after ensureDbReady for game ${code}`)
+    return null
+  }
+  
   const result = await pool.query<{ payload: unknown }>('SELECT payload FROM games_state WHERE code = $1 LIMIT 1', [code])
+  console.log(`[GameStore] Database query for ${code} returned ${result.rowCount} rows`)
+  
   if (!result.rows?.length) return null
 
   const loaded = normalizeLoadedGame(result.rows[0]?.payload)
-  if (!loaded) return null
+  if (!loaded) {
+    console.log(`[GameStore] Failed to normalize loaded game for ${code}`)
+    return null
+  }
 
+  console.log(`[GameStore] Loaded game ${code} (ID: ${loaded.id}) from database with ${loaded.players.length} players, status: ${loaded.status}`)
   games[loaded.id] = loaded
+  console.log(`[GameStore] Stored game ${code} in memory, total games: ${Object.keys(games).length}`)
   return loaded
 }
 

@@ -151,7 +151,7 @@ export default function Right({
 			width: '30%',
 			height: '100%'
 		}}>
-            <Text color='text-primary' size={14} allCaps bold>
+            <Text color='text-primary' size={1} allCaps bold>
                 Qualified
             </Text>
 			<div
@@ -184,7 +184,7 @@ export default function Right({
 					))
 				)}
             </div>
-            <Text color='text-secondary' size={14} allCaps bold>
+            <Text color='text-secondary' size={1} allCaps bold>
                 Barred
             </Text>
             <div

@@ -45,4 +45,5 @@
   animation: lucin-pulse 6s ease-in-out infinite, lucin-morph 8s ease-in-out infinite;
   filter: blur(1px);
   aspect-ratio: 1 / 1;
+  overflow: visible;
 }

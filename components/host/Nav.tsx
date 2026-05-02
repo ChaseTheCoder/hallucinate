@@ -59,8 +59,8 @@ export default function Nav({ gameStatus, code, connected, onEndGame }: NavProps
 				justifyContent: 'space-between'
 			}}>
 				<div style={{ flexDirection: 'column', display: 'flex', alignItems: 'start', gap: 0 }}>
-                    <Text color="text-secondary" size={14} bold allCaps>Code</Text>
-                    <Text color="text-primary" size={36} bold>{code || '----'}</Text>
+                    <Text color="text-secondary" size={1.2} bold allCaps>Code</Text>
+                    <Text color="text-primary" size={2.3} bold>{code || '----'}</Text>
 				</div>
 
                 <div style={{ flexDirection: 'row', display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -74,13 +74,13 @@ export default function Nav({ gameStatus, code, connected, onEndGame }: NavProps
 									transition: 'opacity 220ms ease'
 								}}
 							>
-								<Text color="text-primary" size={18} bold allCaps>
+								<Text color="text-primary" size={1.2} bold allCaps>
 									{status}
 								</Text>
 							</GlassBubble>
 						) : (
 							<div style={{ padding: '8px 16px', borderRadius: '40px', backgroundColor: 'transparent', boxShadow: 'none' }} key={status}>
-								<Text color="text-secondary" size={18} bold allCaps>
+								<Text color="text-secondary" size={1.2} bold allCaps>
 									{status}
 								</Text>
 							</div>

@@ -39,29 +39,10 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
           return
         }
 
-        // Ensure data integrity: only one admin should exist
-        const adminCount = game.players.filter(p => p?.isAdmin).length
-        if (adminCount > 1) {
-          // Multiple admins detected - keep only the first one
-          let foundFirst = false
-          game.players.forEach(p => {
-            if (p.isAdmin && !foundFirst) {
-              foundFirst = true
-            } else {
-              p.isAdmin = false
-            }
-          })
-        } else if (adminCount === 0 && game.players.length > 0 && game.status === 'join') {
-          // No admin exists but we're in join phase - make first player admin
-          game.players[0].isAdmin = true
-        }
-
-        await persistGame(game)
-        
         // Join unified game room
         socket.join(`game-${code}`)
         
-        // Send enriched game state with computed fields
+        // Send enriched game state with computed fields  
         socket.emit('game-state-update', enrichGame(game))
       })
 

@@ -19,13 +19,13 @@ export default function CandidateListItem({ player, showVotes = false, barred = 
 		<GlassBubble style={{ width: '100%', padding: '12px 28px', opacity: barred ? 0.65 : 1 }} contentStyle={{ width: '100%' }} showGlow={isLeaderGlowing}>
 			<div style={{ width: '100%', display: 'flex', justifyContent: 'space-between'}}>
 				<Text
-					size={16}
+					size={1}
 					color={barred ? 'disabled' : 'accent-line'}
 					style={{ textDecoration: barred ? 'line-through' : 'none', textAlign: 'left' }}
 				>
 					{player.name}{player.isAdmin && '*'}
 				</Text>
-				{showVotes ? <Text size={16} color={barred ? 'disabled' : 'accent-line'}>({voteCount} pts)</Text> : null}
+				{showVotes ? <Text size={1} color={barred ? 'disabled' : 'accent-line'}>({voteCount} pts)</Text> : null}
 			</div>
 		</GlassBubble>
 	)

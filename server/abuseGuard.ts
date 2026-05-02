@@ -15,7 +15,7 @@ const gameOwnerByCode = new Map<string, string>()
 
 const CREATE_WINDOW_MS = readPositiveInt(process.env.CREATE_WINDOW_MS, 10 * 60 * 1000)
 const JOIN_WINDOW_MS = readPositiveInt(process.env.JOIN_WINDOW_MS, 10 * 60 * 1000)
-const MAX_CREATE_PER_WINDOW = readPositiveInt(process.env.MAX_CREATE_PER_WINDOW, 3)
+const MAX_CREATE_PER_WINDOW = readPositiveInt(process.env.MAX_CREATE_PER_WINDOW, 300)
 const MAX_JOIN_PER_WINDOW = readPositiveInt(process.env.MAX_JOIN_PER_WINDOW, 40)
 const MAX_ACTIVE_GAMES_PER_IP = readPositiveInt(process.env.MAX_ACTIVE_GAMES_PER_IP, 1)
 const MVP_HOST_ACCESS_KEY = process.env.MVP_HOST_ACCESS_KEY?.trim() || ''
