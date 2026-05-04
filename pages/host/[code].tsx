@@ -5,6 +5,8 @@ import io, { Socket } from 'socket.io-client'
 import Lucin from '../../components/Lucin'
 import Nav from '../../components/host/Nav'
 import Right from '../../components/host/Right'
+import Popover from '../../components/Popover'
+import ButtonLiquid from '../../components/ButtonLiquid'
 import { Game } from '../../types/types'
 import { gameContent } from '../../content/content'
 import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment } from '../../content/hostNarration'
@@ -19,18 +21,18 @@ export default function HostPage() {
   const [game, setGame] = useState<Game | null>(null)
   const [content, setContent] = useState<typeof gameContent[keyof typeof gameContent] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [gameExists, setGameExists] = useState(true)
   const [didLoadAttempted, setDidLoadAttempted] = useState(false)
   const [connected, setConnected] = useState(false)
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>('disconnected')
-  const [socketError, setSocketError] = useState<string | null>(null)
   const [isSubscribed, setIsSubscribed] = useState(false)
+  const [hasInitialGameData, setHasInitialGameData] = useState(false)
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const socketInitializedRef = useRef(false)
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0)
   const hasTransitionedRef = useRef(false)
   const [messageIndex, setMessageIndex] = useState(0)
   const [barredPlayerName, setBarredPlayerName] = useState<string | null>(null)
   const [leaderName, setLeaderName] = useState<string>('TBD')
-  const [currentRound, setCurrentRound] = useState<number>(0)
   const [timeRemaining, setTimeRemaining] = useState<string>('')
   const [qualifiedPlayers, setQualifiedPlayers] = useState<Game['players']>([])
   const [sortedBarredPlayers, setSortedBarredPlayers] = useState<Game['players']>([])
@@ -41,10 +43,11 @@ export default function HostPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [latestBarredName, setLatestBarredName] = useState<string | null>(null)
   const [displayedHostMessages, setDisplayedHostMessages] = useState<string[]>(['Loading...'])
+  const [displayedMessageIndices, setDisplayedMessageIndices] = useState<number[]>([0])
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [audioRetryTick, setAudioRetryTick] = useState(0)
-  const [audioDebugMessage, setAudioDebugMessage] = useState<string | null>(null)
   const [audioAmplitude, setAudioAmplitude] = useState<number>(0)
+  const [showEndGamePopover, setShowEndGamePopover] = useState(false)
   const narrationAudioRef = useRef<HTMLAudioElement | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
@@ -54,6 +57,7 @@ export default function HostPage() {
   const handleTransition = useCallback(async () => {
     if (!gameCode) return
     try {
+      console.log('Attempting game status transition for code:', gameCode)
       const res = await fetch(`/api/game/${gameCode}/update`, {
         method: 'PATCH'
       })
@@ -68,7 +72,10 @@ export default function HostPage() {
 
   // socket connection and game state management
   useEffect(() => {
-    if (!gameCode) return
+    if (!gameCode || !gameExists || !hasInitialGameData) return
+    if (socketInitializedRef.current) return
+
+    socketInitializedRef.current = true
 
     if (!socket) {
       socket = io()
@@ -77,8 +84,6 @@ export default function HostPage() {
     const handleConnect = () => {
       console.log('Socket connected')
       setConnected(true)
-      setConnectionStatus('connected')
-      setSocketError(null)
 
       // Re-subscribe on every successful connect (initial + reconnect)
       socket?.emit('subscribe-to-game', gameCode)
@@ -88,19 +93,17 @@ export default function HostPage() {
     const handleDisconnect = () => {
       console.log('Socket disconnected')
       setConnected(false)
-      setConnectionStatus(socket?.active ? 'reconnecting' : 'disconnected')
       setIsSubscribed(false)
     }
 
     const handleConnectError = (error: Error) => {
       console.error('Socket connect_error:', error)
-      setSocketError(error?.message || 'Connection error')
-      setConnectionStatus(socket?.active ? 'reconnecting' : 'disconnected')
+      console.log(error?.message ?? 'Connection error: handleConnectError')
     }
 
     const handleError = (message: unknown) => {
       console.error('Socket error:', message)
-      setSocketError(typeof message === 'string' ? message : 'Socket error')
+      console.log(typeof message === 'string' ? message : 'Socket error: handleError')
     }
 
     const handleGameStateUpdate = (data: Game) => {
@@ -160,8 +163,9 @@ export default function HostPage() {
       socket.off('game-state-update', handleGameStateUpdate)
       socket.off('game-complete', handleGameComplete)
       socket.off('game-deleted', handleGameDeleted)
+      socketInitializedRef.current = false
     }
-  }, [gameCode, router])
+  }, [gameCode, gameExists, hasInitialGameData, router])
 
   // Fetch initial game state once; socket keeps it live afterward.
   useEffect(() => {
@@ -173,30 +177,34 @@ export default function HostPage() {
     fetch(`/api/game/${gameCode}`, { cache: 'no-store' })
       .then(res => {
         if (!res.ok) {
-          const message = res.status === 404
-            ? 'Game not found'
-            : 'Failed to load game'
+          if (res.status === 404) {
+            setGameExists(false)
+            setIsLoading(false)
+            return null
+          }
+          const message = 'Failed to load game'
           throw new Error(message)
         }
         return res.json()
       })
       .then(data => {
+        if (!data) return
         console.log('Fetched initial game data:', data)
         setLoadError(null)
+        setGameExists(true)
         setGame(data)
+        setHasInitialGameData(true)
       })
       .catch(err => {
         console.error('Error fetching game:', err)
         const message = err instanceof Error ? err.message : 'Unable to fetch game'
         setLoadError(message)
-        if (message !== 'Game not found') {
-          if (retryTimeoutRef.current) {
-            clearTimeout(retryTimeoutRef.current)
-          }
-          retryTimeoutRef.current = setTimeout(() => {
-            setDidLoadAttempted(false)
-          }, 10000)
+        if (retryTimeoutRef.current) {
+          clearTimeout(retryTimeoutRef.current)
         }
+        retryTimeoutRef.current = setTimeout(() => {
+          setDidLoadAttempted(false)
+        }, 10000)
       })
 
     return () => {
@@ -205,6 +213,11 @@ export default function HostPage() {
       }
     }
   }, [gameCode, game, didLoadAttempted])
+
+  // Reset initial data flag when game code changes
+  useEffect(() => {
+    setHasInitialGameData(false)
+  }, [gameCode])
 
   const isLeaderRevealed = (game?.status === 'results' || game?.status === 'final')
     && Array.isArray(content?.hostMessage)
@@ -246,7 +259,6 @@ export default function HostPage() {
     }
 
     setLeaderName(nextLeaderName)
-    setCurrentRound(game?.currentRound ?? 0) 
     setTimeRemaining(nextTimeRemaining)
     setQualifiedPlayers(nextQualifiedPlayers)
     setSortedBarredPlayers(nextSortedBarredPlayers)
@@ -275,7 +287,7 @@ export default function HostPage() {
       console.log('Host screen visible again, checking socket status')
       if (socket) {
         if (!socket.connected) {
-          setConnectionStatus('reconnecting')
+          console.log('reconnecting socket...')
           socket.connect()
         }
         if (socket.connected && gameCode && !isSubscribed) {
@@ -333,7 +345,6 @@ export default function HostPage() {
     }
 
     if (!segment?.audioUrl) {
-      setAudioDebugMessage(null)
       setAutoplayBlocked(false)
       resolveSegment()
 
@@ -347,7 +358,6 @@ export default function HostPage() {
     narrationAudioRef.current = audio
     audio.preload = 'auto'
     audio.crossOrigin = 'anonymous'
-    setAudioDebugMessage(null)
     setAutoplayBlocked(false)
 
     // Set up Web Audio API for volume analysis
@@ -413,7 +423,7 @@ export default function HostPage() {
       const err = error as { name?: string }
       if (err?.name === 'NotAllowedError') {
         setAutoplayBlocked(true)
-        setAudioDebugMessage('Browser blocked autoplay. Audio will auto-retry on the next user interaction.')
+        console.log('Browser blocked autoplay. Audio will auto-retry on the next user interaction.')
         resolveSegment()
         return
       }
@@ -441,7 +451,6 @@ export default function HostPage() {
 
     const retryPlayback = () => {
       setAutoplayBlocked(false)
-      setAudioDebugMessage(null)
       setAudioRetryTick(prev => prev + 1)
     }
 
@@ -459,16 +468,19 @@ export default function HostPage() {
   useEffect(() => {
     if (loadError) {
       setDisplayedHostMessages([loadError])
+      setDisplayedMessageIndices([0])
       return
     }
 
     if (isLoading) {
       setDisplayedHostMessages(['Loading...'])
+      setDisplayedMessageIndices([0])
       return
     }
 
     if (!content?.hostMessage) {
       setDisplayedHostMessages(['Waiting...'])
+      setDisplayedMessageIndices([0])
       return
     }
 
@@ -495,7 +507,10 @@ export default function HostPage() {
           .replace('{WINNER_POINTS}', winnerPoints.toString())
           .replace('{LOSER_POINTS}', loserPoints.toString())
       )
+      // Track original indices for each displayed message
+      const indices = Array.from({ length: messageIndex - startIndex + 1 }, (_, i) => startIndex + i)
       setDisplayedHostMessages(messages)
+      setDisplayedMessageIndices(indices)
     }
   }, [
     game?.status,
@@ -544,11 +559,12 @@ export default function HostPage() {
     autoTransitionedStatusRef.current = null
   }, [game?.status])
 
-  const handleEndGame = async () => {
+  const handleEndGame = () => {
+    setShowEndGamePopover(true)
+  }
+
+  const confirmEndGame = async () => {
     if (!gameCode) return
-    
-    const confirmed = confirm('Are you sure you want to end this game?')
-    if (!confirmed) return
 
     try {
       const res = await fetch(`/api/game/${gameCode}/delete`, {
@@ -562,15 +578,44 @@ export default function HostPage() {
     } catch (error) {
       console.error('Error ending game:', error)
       alert('Failed to end game')
+      setShowEndGamePopover(false)
     }
   }
 
-  const shouldMessageBeBold = (status: Game['status'] | undefined, message: string, index: number): boolean => {
-    if (status === 'join' && index === 0) return true
-    return message.startsWith('Phase')
+  const shouldMessageBeBold = (status: Game['status'] | undefined, message: string, originalIndex: number): boolean => {
+    if (status === 'join' && originalIndex === 0) return true
+    if (message.startsWith('Phase')) return true
+    
+    // Check if the original message has dynamic tokens
+    if (status) {
+      const segment = getHostNarrationSegment(status, originalIndex)
+      if (segment?.hasDynamicTokens) return true
+    }
+    
+    return false
   }
 
   if (!gameCode) return <div style={{ padding: 24 }}>Loading...</div>
+
+  if (!gameExists) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '100vh',
+          padding: 24,
+          gap: 16
+        }}
+      >
+        <h2 style={{ color: '#5A5A5A', margin: 0 }}>Game Not Found</h2>
+        <p style={{ color: '#999', margin: 0 }}>The game code you're looking for doesn't exist.</p>
+        <ButtonLiquid onClick={() => router.push('/start')}>Go to Start</ButtonLiquid>
+      </div>
+    )
+  }
 
   return (
     <div style={{
@@ -628,7 +673,8 @@ export default function HostPage() {
             width: '80%'
           }}>
             {displayedHostMessages.map((message, index) => {
-              const isBold = shouldMessageBeBold(game?.status, message, index)
+              const originalIndex = displayedMessageIndices[index] ?? index
+              const isBold = shouldMessageBeBold(game?.status, message, originalIndex)
               return (
                 <Text key={index} size={isBold ? 1.75 : 1.5} color='text-primary' bold={isBold} style={{ marginBottom: index < displayedHostMessages.length - 1 ? '0.5rem' : 0 }}>
                   {message}
@@ -650,6 +696,14 @@ export default function HostPage() {
           isLeaderRevealed={isLeaderRevealed}
         />
       </div>
+
+      <Popover 
+        isOpen={showEndGamePopover} 
+        onClose={() => setShowEndGamePopover(false)}
+        title="Are you sure you want to end this game?"
+        confirmText="Confirm End Game"
+        onConfirm={confirmEndGame}
+      />
     </div>
   )
 }

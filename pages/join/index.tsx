@@ -48,20 +48,13 @@ export default function Join() {
         <div>
           <label style={{display: 'block', marginBottom: 4, fontWeight: 500}}>Game Code</label>
           <div
-            role="button"
-            tabIndex={0}
             onClick={() => codeInputRef.current?.focus()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                codeInputRef.current?.focus()
-              }
-            }}
             style={{
               position: 'relative',
               display: 'grid',
               gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: 8
+              gap: 8,
+              cursor: 'text'
             }}
           >
             {codeSlots.map((char, index) => (

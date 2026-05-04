@@ -4,6 +4,7 @@ import io, { Socket } from 'socket.io-client'
 import ButtonLiquid from '../../components/ButtonLiquid'
 import VoteButton from '../../components/VoteButton'
 import VotePanel from '../../components/player/VotePanel'
+import Popover from '../../components/Popover'
 import { gameContent } from '../../content/content'
 import { Player } from '../../types/types'
 
@@ -44,6 +45,7 @@ export default function PlayerPage() {
   const [isLeader, setIsLeader] = useState(false)
   const [qualifiedPlayers, setQualifiedPlayers] = useState<Player[]>([])
   const [decisionCandidates, setDecisionCandidates] = useState<Player[]>([])
+  const [showLeaveGamePopover, setShowLeaveGamePopover] = useState(false)
 
   // Initialize session data from URL and localStorage
   useEffect(() => {
@@ -58,10 +60,37 @@ export default function PlayerPage() {
     setSessionData(session)
     localStorage.setItem('playerSession', JSON.stringify(session))
 
-    // Verify the game exists
+    // Fetch initial game state
     fetch(`/api/game/${gameCode}`)
       .then(res => {
-        setGameExists(res.ok)
+        if (!res.ok) {
+          setGameExists(false)
+          setLoading(false)
+          return
+        }
+        return res.json()
+      })
+      .then(data => {
+        if (!data) return
+        
+        setGameExists(true)
+        setGameStatus(data.status)
+        setAllPlayers(data.players || [])
+        
+        if (data.electionCycleStartTime !== undefined) {
+          setElectionCycleStartTime(data.electionCycleStartTime)
+        }
+        if (data.cycleTime !== undefined) {
+          setCycleTime(data.cycleTime)
+        }
+        
+        // Update current player info
+        const updatedCurrentPlayer = data.players?.find((p: Player) => p.name === playerName)
+        if (updatedCurrentPlayer) {
+          setCurrentPlayer(updatedCurrentPlayer)
+          setHasVoted(updatedCurrentPlayer.hasVoted)
+        }
+        
         setLoading(false)
       })
       .catch(() => {
@@ -326,7 +355,11 @@ export default function PlayerPage() {
     }
   }
 
-  async function handleLeaveGame() {
+  const handleLeaveGameClick = () => {
+    setShowLeaveGamePopover(true)
+  }
+
+  const confirmLeaveGame = async () => {
     // Remove player from game
     if (gameCode && sessionData?.playerName) {
       await fetch(`/api/game/${gameCode}/leave`, {
@@ -456,7 +489,7 @@ export default function PlayerPage() {
         >
           <div
             style={{
-              fontSize: '2.5em',
+              fontSize: '1em',
               fontFamily: 'monospace',
               fontWeight: 'bold',
               color: '#5A5A5A'
@@ -477,7 +510,7 @@ export default function PlayerPage() {
             </span>
           )}
         </div>
-        <ButtonLiquid onClick={handleLeaveGame}>Leave Game</ButtonLiquid>
+        <ButtonLiquid onClick={handleLeaveGameClick}>Leave Game</ButtonLiquid>
       </div>
 
       {/* Main Content */}
@@ -632,6 +665,14 @@ export default function PlayerPage() {
           </div>
         )}
       </div>
+
+      <Popover 
+        isOpen={showLeaveGamePopover} 
+        onClose={() => setShowLeaveGamePopover(false)}
+        title="Are you sure you want to leave this game?"
+        confirmText="Confirm Leave Game"
+        onConfirm={confirmLeaveGame}
+      />
     </div>
   )
 }

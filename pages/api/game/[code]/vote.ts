@@ -75,18 +75,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
       }
 
-      // Validate that all three votes are for different players
-      const uniqueVotes = new Set(votes)
-
-      // Validate that voter didn't vote for themselves
-      if (votes.includes(voterId)) {
-        return res.status(400).json({ 
-          error: 'Cannot vote for yourself',
-          details: 'You must vote for other players',
-          recoveryAction: 'Select different players and resubmit'
-        })
-      }
-
     // Validate that all voted players exist and are qualified to run for leader
     const votedPlayers = votes.map(playerId => {
       const player = game.players.find(p => p.id === playerId)

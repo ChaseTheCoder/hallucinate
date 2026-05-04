@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import ButtonLiquid from '../ButtonLiquid'
 import VoteButton from '../VoteButton'
 import { Player } from '../../types/types'
@@ -33,13 +33,7 @@ export default function VotePanel({
     return <div>Loading...</div>
   }
 
-  // Filter out current player from voting options
-  const availablePlayers = useMemo(
-    () => qualifiedPlayers.filter(p => p.id !== currentPlayer.id),
-    [qualifiedPlayers, currentPlayer.id]
-  )
-
-  const requiredVotes = Math.min(3, availablePlayers.length)
+  const requiredVotes = Math.min(3, qualifiedPlayers.length)
 
   // Determine which position a player occupies in votes
   const getVotePosition = (playerId: string): keyof VoteSelection | null => {
@@ -146,7 +140,7 @@ export default function VotePanel({
           overflowY: 'auto'
         }}
       >
-        {availablePlayers.map(player => {
+        {qualifiedPlayers.map(player => {
           const votePosition = getVotePosition(player.id)
           const voteValue = getVoteValue(votePosition)
 
