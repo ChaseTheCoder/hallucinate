@@ -586,9 +586,7 @@ export default function PlayerPage() {
                 marginLeft: 'calc(-50vw + 50%)',
                 marginRight: 'calc(-50vw + 50%)',
                 marginBottom: -24,
-                padding: '16px 24px',
-                borderTop: '1px solid #E0E0E0',
-                backgroundColor: '#FFFFFF'
+                padding: '16px 24px 64px 24px',
               }}
             >
               <ButtonLiquid
