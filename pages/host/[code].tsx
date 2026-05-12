@@ -57,14 +57,7 @@ export default function HostPage() {
   const handleTransition = useCallback(async () => {
     if (!gameCode) return
     try {
-      console.log('Attempting game status transition for code:', gameCode)
-      const res = await fetch(`/api/game/${gameCode}/update`, {
-        method: 'PATCH'
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || 'Failed to transition')
-      }
+      await updateGame(gameCode);
     } catch (error) {
       console.error('Error transitioning:', error)
     }

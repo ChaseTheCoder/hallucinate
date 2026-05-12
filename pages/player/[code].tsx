@@ -7,6 +7,9 @@ import VotePanel from '../../components/player/VotePanel'
 import Popover from '../../components/Popover'
 import { gameContent } from '../../content/content'
 import { Player } from '../../types/types'
+import { submitVote } from '../../utils/player/submitVote'
+import { leaveGame } from '../../utils/player/leaveGame'
+import { updateGame } from '../../utils/player/updateGame'
 
 let socket: Socket | null = null
 
@@ -38,7 +41,6 @@ export default function PlayerPage() {
   const [timeRemaining, setTimeRemaining] = useState<string>('')
   const [electionCycleStartTime, setElectionCycleStartTime] = useState<number>(0)
   const [cycleTime, setCycleTime] = useState<number>(10)
-  const [winnerId, setWinnerId] = useState<string | null>(null)
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('disconnected')
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -298,20 +300,7 @@ export default function PlayerPage() {
 
     setIsSubmittingVote(true)
     try {
-      const res = await fetch(`/api/game/${gameCode}/vote`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          voterId: currentPlayer.id,
-          votes
-        })
-      })
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || 'Failed to submit vote')
-      }
-
+      await submitVote(gameCode, currentPlayer.id, votes)
       setHasVoted(true)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to submit vote'
@@ -331,20 +320,7 @@ export default function PlayerPage() {
 
     setIsSubmittingDecision(true)
     try {
-      const res = await fetch(`/api/game/${gameCode}/decision`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          leaderId: currentPlayer.id,
-          barredId: decisionSelection
-        })
-      })
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || 'Failed to submit decision')
-      }
-
+      await submitDecision(gameCode, currentPlayer.id, decisionSelection)
       setDecisionSelection(null)
       setDecisionError(null)
     } catch (error) {
@@ -360,13 +336,8 @@ export default function PlayerPage() {
   }
 
   const confirmLeaveGame = async () => {
-    // Remove player from game
     if (gameCode && sessionData?.playerName) {
-      await fetch(`/api/game/${gameCode}/leave`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: sessionData.playerName })
-      })
+      await leaveGame(gameCode, sessionData.playerName)
     }
     // Clear stored session info
     localStorage.removeItem('playerSession')
@@ -387,18 +358,7 @@ export default function PlayerPage() {
         body.cycleTime = seconds
       }
 
-      const res = await fetch(`/api/game/${gameCode}/update`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
-      })
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || 'Failed to start game')
-      }
+      await updateGame(gameCode, body)
 
       if (gameStatus === 'join') {
         setCycleTimeSet(true)
@@ -431,16 +391,6 @@ export default function PlayerPage() {
         <ButtonLiquid onClick={() => router.push('/')}>Go Home</ButtonLiquid>
       </div>
     )
-  }
-
-  const getWinnerInfo = (winnerId: string | null) => {
-    const winner = allPlayers.find(p => p.id === winnerId)
-    return {
-      winner,
-      winnerName: winner?.name || 'TBD',
-      winnerPoints: winner?.votes || 0,
-      loserPoints: allPlayers.filter(p => p.isQualified && p.id !== winnerId).reduce((max, p) => Math.max(max, p.votes), 0)
-    }
   }
 
   return (
