@@ -76,7 +76,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
     // Validate that all voted players exist and are qualified to run for leader
-    const votedPlayers = votes.map(playerId => {
+    votes.forEach(playerId => {
       const player = game.players.find(p => p.id === playerId)
       if (!player) {
         throw new Error(`Player with ID ${playerId} not found`)
@@ -84,7 +84,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!player.isQualified) {
         throw new Error(`${player.name} is not qualified to run for leader`)
       }
-      return player
     })
 
     // Initialize round if needed
@@ -98,17 +97,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-      // Add points to the voted players
-      votedPlayers.forEach((player, index) => {
-        player.votes += VOTE_POINTS[index]
-      })
-
       // Mark voter as having voted and ensure they are marked as connected (handles reconnection)
       voter.hasVoted = true
       voter.isConnected = true
 
-    // Record votes in round data (for audit trail)
-    game.rounds[game.currentRound].votes[voterId] = VOTE_POINTS
+    // Record ballot as ranked player IDs for this round.
+    game.rounds[game.currentRound].votes[voterId] = votes
 
     // Check if ALL CONNECTED players have voted
     const connectedPlayers = game.players.filter(p => p.isConnected)
@@ -119,6 +113,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const resWithSocket = res as NextApiResponseWithSocket
 
     if (allVotesIn) {
+      const roundBallots = game.rounds[game.currentRound]?.votes ?? {}
+      const roundVoteTotals: Record<string, number> = {}
+
+      Object.values(roundBallots).forEach(ballot => {
+        ballot.forEach((candidateId, index) => {
+          const points = VOTE_POINTS[index] ?? 0
+          if (!points) return
+          roundVoteTotals[candidateId] = (roundVoteTotals[candidateId] ?? 0) + points
+        })
+      })
+
+      // Apply round totals only once all connected players have voted.
+      game.players.forEach(player => {
+        if (!player.isQualified) {
+          player.votes = 0
+          return
+        }
+        player.votes = roundVoteTotals[player.id] ?? 0
+      })
+
       // Transition to results or complete and compute leader/winner once all votes are in
       const qualifiedPlayers = game.players.filter(p => p.isQualified)
       const sortedPlayers = [...qualifiedPlayers].sort((a, b) => b.votes - a.votes)

@@ -70,7 +70,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         newStatus = 'campaign'
         game.players.forEach(p => {
           p.hasVoted = false
-          p.votes = 0
         })
         game.currentRound += 1
       }

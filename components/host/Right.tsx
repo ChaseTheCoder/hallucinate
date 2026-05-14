@@ -176,8 +176,8 @@ export default function Right({
 						>
 							<CandidateListItem
 								player={player}
-							showVotes={(gameStatus === 'results' || gameStatus === 'final') || displayVoteMap[player.id] !== undefined}
-								displayVotes={displayVoteMap[player.id]}
+								showVotes={gameStatus === 'vote' || gameStatus === 'results' || gameStatus === 'final' || displayVoteMap[player.id] !== undefined}
+								displayVotes={displayVoteMap[player.id] ?? player.votes}
 								isLeaderRevealed={isLeaderRevealed}
 							/>
 						</div>

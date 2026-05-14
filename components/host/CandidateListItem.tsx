@@ -12,7 +12,6 @@ type CandidateListItemProps = {
 
 export default function CandidateListItem({ player, showVotes = false, barred = false, displayVotes, isLeaderRevealed = false }: CandidateListItemProps) {
 	const voteCount = displayVotes ?? player.votes
-
 	const isLeaderGlowing = player.leader && isLeaderRevealed
 
 	return (

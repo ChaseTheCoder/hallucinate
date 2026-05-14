@@ -10,3 +10,5 @@ export const leaveGame = async (gameCode: string, playerName: string): Promise<v
     throw new Error(data?.error || 'Failed to leave game')
   }
 }
+
+export default leaveGame;

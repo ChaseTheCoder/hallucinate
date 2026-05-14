@@ -10,6 +10,7 @@ import ButtonLiquid from '../../components/ButtonLiquid'
 import { Game } from '../../types/types'
 import { gameContent } from '../../content/content'
 import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment } from '../../content/hostNarration'
+import updateGame from '../../utils/updateGame'
 
 let socket: Socket | null = null
 const AUTO_TRANSITION_STATUSES: Game['status'][] = ['rules', 'results', 'announcement']
@@ -44,6 +45,8 @@ export default function HostPage() {
   const [latestBarredName, setLatestBarredName] = useState<string | null>(null)
   const [displayedHostMessages, setDisplayedHostMessages] = useState<string[]>(['Loading...'])
   const [displayedMessageIndices, setDisplayedMessageIndices] = useState<number[]>([0])
+  const [isLeaderRevealed, setIsLeaderRevealed] = useState(false)
+  const [isBarredRevealed, setIsBarredRevealed] = useState(false)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [audioRetryTick, setAudioRetryTick] = useState(0)
   const [audioAmplitude, setAudioAmplitude] = useState<number>(0)
@@ -212,13 +215,17 @@ export default function HostPage() {
     setHasInitialGameData(false)
   }, [gameCode])
 
-  const isLeaderRevealed = (game?.status === 'results' || game?.status === 'final')
-    && Array.isArray(content?.hostMessage)
-    && messageIndex >= content.hostMessage.length - 1
+  useEffect(() => {
+    const hasReachedLastMessage = Array.isArray(content?.hostMessage)
+      && messageIndex >= content.hostMessage.length - 1
 
-  const isBarredRevealed = game?.status === 'announcement'
-    && Array.isArray(content?.hostMessage)
-    && messageIndex >= content.hostMessage.length - 1
+    setIsLeaderRevealed(
+      (game?.status === 'results' || game?.status === 'final') && hasReachedLastMessage
+    )
+    setIsBarredRevealed(
+      game?.status === 'announcement' && hasReachedLastMessage
+    )
+  }, [game?.status, content?.hostMessage, messageIndex])
 
   // Keep display values in state so UI updates immediately from live game updates.
   useEffect(() => {

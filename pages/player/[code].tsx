@@ -4,12 +4,16 @@ import io, { Socket } from 'socket.io-client'
 import ButtonLiquid from '../../components/ButtonLiquid'
 import VoteButton from '../../components/VoteButton'
 import VotePanel from '../../components/player/VotePanel'
+import PlayerHeader from '../../components/player/PlayerHeader'
+import LeaderDecisionPanel from '../../components/player/LeaderDecisionPanel'
+import CampaignTimePanel from '../../components/player/CampaignTimePanel'
 import Popover from '../../components/Popover'
 import { gameContent } from '../../content/content'
 import { Player } from '../../types/types'
 import { submitVote } from '../../utils/player/submitVote'
 import { leaveGame } from '../../utils/player/leaveGame'
-import { updateGame } from '../../utils/player/updateGame'
+import submitDecision from '../../utils/player/submitDecision'
+import updateGame from '../../utils/updateGame'
 
 let socket: Socket | null = null
 
@@ -422,46 +426,11 @@ export default function PlayerPage() {
       </div>
 
       {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 24
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            gap: 8
-          }}
-        >
-          <div
-            style={{
-              fontSize: '1em',
-              fontFamily: 'monospace',
-              fontWeight: 'bold',
-              color: '#5A5A5A'
-            }}
-          >
-            {playerName || 'Player'}
-          </div>
-          {isAdmin && (
-            <span
-              style={{
-                fontSize: '0.8em',
-                fontFamily: 'monospace',
-                fontWeight: 'bold',
-                color: '#5A5A5A'
-              }}
-            >
-              Admin
-            </span>
-          )}
-        </div>
-        <ButtonLiquid onClick={handleLeaveGameClick}>Leave Game</ButtonLiquid>
-      </div>
+      <PlayerHeader
+        playerName={playerName}
+        isAdmin={isAdmin}
+        onLeaveGame={handleLeaveGameClick}
+      />
 
       {/* Main Content */}
       <div
@@ -480,78 +449,15 @@ export default function PlayerPage() {
             code={gameCode as string}
           />
         ) : gameStatus === 'decision' && isLeader ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 24,
-              width: '100%',
-              height: '100%'
-            }}
-          >
-            <div style={{ textAlign: 'center' }}>
-              <h2 style={{ color: '#5A5A5A', margin: '0 0 8px 0' }}>Leader Decision</h2>
-              <p style={{ color: '#999', margin: 0, fontSize: '0.9em' }}>
-                {playerMessage || 'Choose a player to bar from election.'}
-              </p>
-            </div>
-
-            {decisionError && (
-              <div
-                style={{
-                  padding: 12,
-                  backgroundColor: '#ffebee',
-                  color: '#c62828',
-                  borderRadius: 4,
-                  fontSize: '0.9em',
-                  textAlign: 'center'
-                }}
-              >
-                {decisionError}
-              </div>
-            )}
-
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-                flex: 1,
-                overflowY: 'auto'
-              }}
-            >
-              {decisionCandidates.map(player => (
-                <VoteButton
-                  key={player.id}
-                  label={player.name}
-                  selected={decisionSelection === player.id}
-                  onClick={() => setDecisionSelection(player.id)}
-                />
-              ))}
-            </div>
-
-            <div
-              style={{
-                width: '100vw',
-                marginLeft: 'calc(-50vw + 50%)',
-                marginRight: 'calc(-50vw + 50%)',
-                marginBottom: -24,
-                padding: '16px 24px 64px 24px',
-              }}
-            >
-              <ButtonLiquid
-                onClick={handleSubmitDecision}
-                disabled={!decisionSelection || isSubmittingDecision}
-                style={{
-                  width: '100%',
-                  opacity: decisionSelection ? 1 : 0.5,
-                  cursor: decisionSelection ? 'pointer' : 'not-allowed'
-                }}
-              >
-                {isSubmittingDecision ? 'Submitting...' : 'Submit Decision'}
-              </ButtonLiquid>
-            </div>
-          </div>
+          <LeaderDecisionPanel
+            playerMessage={playerMessage}
+            decisionError={decisionError}
+            decisionCandidates={decisionCandidates}
+            decisionSelection={decisionSelection}
+            isSubmittingDecision={isSubmittingDecision}
+            onSelectDecision={setDecisionSelection}
+            onSubmitDecision={handleSubmitDecision}
+          />
         ) : (
           <div
             style={{
@@ -566,49 +472,12 @@ export default function PlayerPage() {
               {playerMessage || 'null...'}
             </p>
             {isAdmin && gameStatus === 'join' && !cycleTimeSet && (
-              <>
-                <p
-                  style={{
-                    color: '#5A5A5A',
-                    textAlign: 'center',
-                    marginTop: 12
-                  }}
-                >
-                  Set campaign time per round (seconds):
-                </p>
-                <input
-                  type="number"
-                  min="5"
-                  max="60"
-                  value={cycleTimeInput}
-                  onChange={(e) => setCycleTimeInput(e.target.value)}
-                  style={{
-                    padding: '8px 12px',
-                    fontSize: '1em',
-                    border: '1px solid #5A5A5A',
-                    borderRadius: 4,
-                    textAlign: 'center',
-                    width: '120px'
-                  }}
-                />
-                <ButtonLiquid
-                  onClick={handleStartGameClick}
-                  disabled={allPlayers.length < 4}
-                  style={{ marginTop: 12 }}
-                >
-                  Start Game
-                </ButtonLiquid>
-                {allPlayers.length < 4 && (
-                  <p style={{
-                    color: '#E03E3E',
-                    textAlign: 'center',
-                    marginTop: 8,
-                    fontSize: '0.9em'
-                  }}>
-                    Need at least 4 players to start ({allPlayers.length}/4)
-                  </p>
-                )}
-              </>
+              <CampaignTimePanel
+                cycleTimeInput={cycleTimeInput}
+                onCycleTimeChange={setCycleTimeInput}
+                onStartGame={handleStartGameClick}
+                playerCount={allPlayers.length}
+              />
             )}
           </div>
         )}

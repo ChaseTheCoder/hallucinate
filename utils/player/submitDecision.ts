@@ -13,3 +13,5 @@ const submitDecision = async (gameCode: string, submittingLeaderId: string, subm
     throw new Error(data?.error || 'Failed to submit decision')
     }
 }
+
+export default submitDecision;

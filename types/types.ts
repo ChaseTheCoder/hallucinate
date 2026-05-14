@@ -14,7 +14,7 @@ export interface GameRound {
   roundNumber: number
   leader: string // Player ID
   barred: string[] // Array of barred player IDs
-  votes: Record<string, number[]> // { playerId: [5, 3, 1, ...] } for each round's votes
+  votes: Record<string, string[]> // { voterId: [candidateId, candidateId, ...] } ranked ballots for the round
   roundStartTime: number // timestamp
 }
 

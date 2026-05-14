@@ -62,6 +62,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   barredPlayer.isQualified = false
   barredPlayer.roundsBarred += 1
+  barredPlayer.votes = 0
 
   if (game.rounds[game.currentRound]) {
     game.rounds[game.currentRound].barred.push(barredPlayer.id)
