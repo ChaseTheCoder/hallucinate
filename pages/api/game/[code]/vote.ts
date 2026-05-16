@@ -47,6 +47,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
       }
 
+      // Ensure rounds array exists and is initialized
+      if (!Array.isArray(game.rounds)) {
+        game.rounds = []
+      }
+
       // Check game status
       if (game.status !== 'vote' && game.status !== 'final') {
         return res.status(400).json({ 
@@ -141,11 +146,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (qualifiedPlayers.length <= 2) {
         // Final election - determine winner
         game.status = 'final'
+        game.players.forEach(p => {
+          p.leader = false
+          p.hasVoted = false  // Reset for any subsequent phases
+        })
         if (newLeader) {
           game.winner = newLeader.id
+          newLeader.leader = true
+
+          // Keep all qualified players visible so they can see final vote totals
+          if (game.rounds[game.currentRound]) {
+            game.rounds[game.currentRound].leader = newLeader.id
+          }
         }
       } else {
         game.status = 'results'
+        game.players.forEach(p => {
+          p.hasVoted = false  // Reset for next phase
+          if (!p.isQualified) {
+            p.leader = false
+          }
+        })
         if (newLeader) {
           game.players.forEach(p => p.leader = false)
           newLeader.leader = true

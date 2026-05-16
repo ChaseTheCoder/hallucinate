@@ -56,6 +56,7 @@ export default function HostPage() {
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animationFrameRef = useRef<number | null>(null)
   const autoTransitionedStatusRef = useRef<Game['status'] | null>(null)
+  const narrationAvailabilityCacheRef = useRef<Record<string, boolean>>({})
 
   const handleTransition = useCallback(async () => {
     if (!gameCode) return
@@ -65,6 +66,23 @@ export default function HostPage() {
       console.error('Error transitioning:', error)
     }
   }, [gameCode])
+
+  const hasNarrationAudio = useCallback(async (audioUrl: string) => {
+    const cached = narrationAvailabilityCacheRef.current[audioUrl]
+    if (cached !== undefined) {
+      return cached
+    }
+
+    try {
+      const response = await fetch(audioUrl, { method: 'HEAD' })
+      const exists = response.ok
+      narrationAvailabilityCacheRef.current[audioUrl] = exists
+      return exists
+    } catch {
+      narrationAvailabilityCacheRef.current[audioUrl] = false
+      return false
+    }
+  }, [])
 
   // socket connection and game state management
   useEffect(() => {
@@ -216,11 +234,16 @@ export default function HostPage() {
   }, [gameCode])
 
   useEffect(() => {
-    const hasReachedLastMessage = Array.isArray(content?.hostMessage)
+    const currentStatusContent = game?.status
+      ? gameContent[game.status as keyof typeof gameContent]
+      : null
+    const hasLoadedCurrentStatusContent = Boolean(currentStatusContent && content === currentStatusContent)
+    const hasReachedLastMessage = hasLoadedCurrentStatusContent
+      && Array.isArray(content?.hostMessage)
       && messageIndex >= content.hostMessage.length - 1
 
     setIsLeaderRevealed(
-      (game?.status === 'results' || game?.status === 'final') && hasReachedLastMessage
+      (game?.status === 'results' || game?.status === 'final') ? hasReachedLastMessage : true
     )
     setIsBarredRevealed(
       game?.status === 'announcement' && hasReachedLastMessage
@@ -344,7 +367,7 @@ export default function HostPage() {
       narrationAudioRef.current = null
     }
 
-    if (!segment?.audioUrl) {
+    if (!segment?.audioUrl || segment.hasDynamicTokens) {
       setAutoplayBlocked(false)
       resolveSegment()
 

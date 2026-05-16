@@ -16,6 +16,24 @@ export default function Right({
 	gameStatus,
 	isLeaderRevealed = false
 }: RightProps = {}) {
+	const orderIdsEqual = (a: string[], b: string[]) => {
+		if (a.length !== b.length) return false
+		for (let i = 0; i < a.length; i += 1) {
+			if (a[i] !== b[i]) return false
+		}
+		return true
+	}
+
+	const voteMapsEqual = (a: Record<string, number>, b: Record<string, number>) => {
+		const aKeys = Object.keys(a)
+		const bKeys = Object.keys(b)
+		if (aKeys.length !== bKeys.length) return false
+		for (const key of aKeys) {
+			if (a[key] !== b[key]) return false
+		}
+		return true
+	}
+
 	const [displayVoteMap, setDisplayVoteMap] = useState<Record<string, number>>({})
 	const [revealedVoteMap, setRevealedVoteMap] = useState<Record<string, number>>({})
 	const [qualifiedOrderIds, setQualifiedOrderIds] = useState<string[]>([])
@@ -37,19 +55,33 @@ export default function Right({
 				.map(player => player.id)
 		}
 
-		if (Object.keys(revealedVoteMap).length > 0) {
+		// Preserve current order during results/final announcement or vote scramble
+		if ((gameStatus === 'results' || gameStatus === 'final') || Object.keys(revealedVoteMap).length > 0) {
 			const qualifiedIds = qualifiedPlayers.map(player => player.id)
 			const qualifiedSet = new Set(qualifiedIds)
+			if (qualifiedOrderIds.length === 0) {
+				return qualifiedIds
+			}
 			const validCurrent = qualifiedOrderIds.filter(id => qualifiedSet.has(id))
 			const added = qualifiedIds.filter(id => !qualifiedOrderIds.includes(id))
 			return [...validCurrent, ...added]
 		}
 
 		return qualifiedPlayers.map(player => player.id)
-	}, [qualifiedPlayers, gameStatus, isLeaderRevealed, revealedVoteMap])
+	}, [qualifiedPlayers, gameStatus, isLeaderRevealed, revealedVoteMap, qualifiedOrderIds])
 
 	useEffect(() => {
-		if (gameStatus !== 'results' && gameStatus !== 'final') {
+		if (gameStatus === 'final') {
+			const finalVotes = Object.fromEntries(qualifiedPlayers.map(player => [player.id, player.votes]))
+			setDisplayVoteMap(prev => voteMapsEqual(prev, finalVotes) ? prev : finalVotes)
+			setRevealedVoteMap(prev => {
+				const merged = { ...prev, ...finalVotes }
+				return voteMapsEqual(prev, merged) ? prev : merged
+			})
+			return
+		}
+
+		if (gameStatus !== 'results') {
 			setDisplayVoteMap(() => {
 				const next: Record<string, number> = {}
 				qualifiedPlayers.forEach(player => {
@@ -67,9 +99,12 @@ export default function Right({
 			const revealedVotes = Object.fromEntries(qualifiedPlayers.map(player => [player.id, player.votes]))
 			const hasNewData = qualifiedPlayers.some(p => revealedVoteMap[p.id] !== p.votes)
 			if (hasNewData) {
-				setRevealedVoteMap(prev => ({ ...prev, ...revealedVotes }))
-				setDisplayVoteMap(revealedVotes)
+				setRevealedVoteMap(prev => {
+					const merged = { ...prev, ...revealedVotes }
+					return voteMapsEqual(prev, merged) ? prev : merged
+				})
 			}
+			setDisplayVoteMap(prev => voteMapsEqual(prev, revealedVotes) ? prev : revealedVotes)
 			return
 		}
 
@@ -89,7 +124,7 @@ export default function Right({
 
 	useEffect(() => {
 		if (qualifiedOrderIds.length === 0) {
-			setQualifiedOrderIds(targetOrderIds)
+			setQualifiedOrderIds(prev => orderIdsEqual(prev, targetOrderIds) ? prev : targetOrderIds)
 			return
 		}
 
@@ -104,7 +139,8 @@ export default function Right({
 			const targetSet = new Set(targetOrderIds)
 			const validCurrent = qualifiedOrderIds.filter(id => targetSet.has(id))
 			const added = targetOrderIds.filter(id => !qualifiedOrderIds.includes(id))
-			setQualifiedOrderIds([...validCurrent, ...added])
+			const nextOrder = [...validCurrent, ...added]
+			setQualifiedOrderIds(prev => orderIdsEqual(prev, nextOrder) ? prev : nextOrder)
 			return
 		}
 
@@ -116,7 +152,7 @@ export default function Right({
 			}
 		})
 
-		setQualifiedOrderIds(targetOrderIds)
+		setQualifiedOrderIds(prev => orderIdsEqual(prev, targetOrderIds) ? prev : targetOrderIds)
 
 		requestAnimationFrame(() => {
 			targetOrderIds.forEach(id => {
