@@ -44,6 +44,8 @@ export default function Right({
 		[qualifiedPlayers]
 	)
 
+	const isRevealStatus = gameStatus === 'results' || gameStatus === 'final'
+
 	const targetOrderIds = useMemo(() => {
 		if ((gameStatus === 'results' || gameStatus === 'final') && isLeaderRevealed) {
 			return [...qualifiedPlayers]
@@ -71,17 +73,7 @@ export default function Right({
 	}, [qualifiedPlayers, gameStatus, isLeaderRevealed, revealedVoteMap, qualifiedOrderIds])
 
 	useEffect(() => {
-		if (gameStatus === 'final') {
-			const finalVotes = Object.fromEntries(qualifiedPlayers.map(player => [player.id, player.votes]))
-			setDisplayVoteMap(prev => voteMapsEqual(prev, finalVotes) ? prev : finalVotes)
-			setRevealedVoteMap(prev => {
-				const merged = { ...prev, ...finalVotes }
-				return voteMapsEqual(prev, merged) ? prev : merged
-			})
-			return
-		}
-
-		if (gameStatus !== 'results') {
+		if (!isRevealStatus) {
 			setDisplayVoteMap(() => {
 				const next: Record<string, number> = {}
 				qualifiedPlayers.forEach(player => {
@@ -95,8 +87,9 @@ export default function Right({
 			return
 		}
 
+		const revealedVotes = Object.fromEntries(qualifiedPlayers.map(player => [player.id, player.votes]))
+
 		if (isLeaderRevealed) {
-			const revealedVotes = Object.fromEntries(qualifiedPlayers.map(player => [player.id, player.votes]))
 			const hasNewData = qualifiedPlayers.some(p => revealedVoteMap[p.id] !== p.votes)
 			if (hasNewData) {
 				setRevealedVoteMap(prev => {
@@ -108,19 +101,24 @@ export default function Right({
 			return
 		}
 
-		const interval = setInterval(() => {
-			setDisplayVoteMap(prev => {
-				const next: Record<string, number> = {}
-				qualifiedPlayers.forEach(player => {
-					const range = Math.max(10, player.votes + 6)
-					next[player.id] = Math.floor(Math.random() * range)
-				})
-				return { ...prev, ...next }
+		const getScrambledVotes = () => {
+			const next: Record<string, number> = {}
+			qualifiedPlayers.forEach(player => {
+				const range = Math.max(10, player.votes + 6)
+				next[player.id] = Math.floor(Math.random() * range)
 			})
+			return next
+		}
+
+		// Set immediately so real votes never flash while reveal is pending.
+		setDisplayVoteMap(getScrambledVotes())
+
+		const interval = setInterval(() => {
+			setDisplayVoteMap(getScrambledVotes())
 		}, 80)
 
 		return () => clearInterval(interval)
-	}, [qualifiedPlayers, gameStatus, isLeaderRevealed, revealedVoteMap])
+	}, [qualifiedPlayers, isRevealStatus, isLeaderRevealed, revealedVoteMap])
 
 	useEffect(() => {
 		if (qualifiedOrderIds.length === 0) {
@@ -178,6 +176,8 @@ export default function Right({
 		.map(id => qualifiedById[id])
 		.filter((player): player is NonNullable<typeof player> => Boolean(player))
 
+	const shouldShowRealVotes = !isRevealStatus || isLeaderRevealed
+
 	return (
 		<div style={{
 			display: 'flex',
@@ -213,7 +213,7 @@ export default function Right({
 							<CandidateListItem
 								player={player}
 								showVotes={gameStatus === 'vote' || gameStatus === 'results' || gameStatus === 'final' || displayVoteMap[player.id] !== undefined}
-								displayVotes={displayVoteMap[player.id] ?? player.votes}
+								displayVotes={displayVoteMap[player.id] ?? (shouldShowRealVotes ? player.votes : 0)}
 								isLeaderRevealed={isLeaderRevealed}
 							/>
 						</div>

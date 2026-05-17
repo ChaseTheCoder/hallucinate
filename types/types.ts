@@ -40,3 +40,37 @@ export interface Game {
 export interface GameStore {
   [id: string]: Game
 }
+
+export interface PlayerProjection {
+  code: string
+  status: StatusTypes
+  contentKey: StatusTypes
+  session: {
+    playerId: string
+    playerName: string
+  }
+  actions: {
+    canVote: boolean
+    canDecide: boolean
+  }
+  vote?: {
+    hasSubmitted: boolean
+    requiredVotes: number
+    candidates: Array<{
+      id: string
+      name: string
+    }>
+  }
+  decision?: {
+    candidates: Array<{
+      id: string
+      name: string
+    }>
+  }
+  admin?: {
+    canStartGame: boolean
+    startBlockedReason?: string
+    connectedPlayers: number
+    minPlayersRequired: number
+  }
+}

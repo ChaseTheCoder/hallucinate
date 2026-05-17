@@ -1,11 +1,10 @@
 import ButtonLiquid from '../ButtonLiquid'
 import VoteButton from '../VoteButton'
-import { Player } from '../../types/types'
 
 type LeaderDecisionPanelProps = {
   playerMessage: string | null
   decisionError: string | null
-  decisionCandidates: Player[]
+  decisionCandidates: Array<{ id: string; name: string }>
   decisionSelection: string | null
   isSubmittingDecision: boolean
   onSelectDecision: (playerId: string) => void

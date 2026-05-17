@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { enrichGame, findGameByCode, persistGame } from '../../../../server/gameStore'
+import { emitRoleBasedGameUpdates, findGameByCode, persistGame } from '../../../../server/gameStore'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 import { StatusTypes } from '../../../../types/types'
@@ -102,7 +102,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Broadcast the campaign time for this specific round
       const resWithSocket = res as NextApiResponseWithSocket
       if (resWithSocket.socket?.server?.io) {
-        resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
+        emitRoleBasedGameUpdates(resWithSocket.socket.server.io, game)
       }
       await persistGame(game)
       return res.status(200).json({ success: true, status: newStatus })
@@ -111,7 +111,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Broadcast complete game state to unified room (one emission)
     const resWithSocket = res as NextApiResponseWithSocket
     if (resWithSocket.socket?.server?.io) {
-      resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
+      emitRoleBasedGameUpdates(resWithSocket.socket.server.io, game)
     }
 
     await persistGame(game)

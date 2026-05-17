@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { Server as SocketIOServer } from 'socket.io'
 import { Server as NetServer, Socket } from 'net'
-import { enrichGame, findGameByCode, persistGame } from '../../../../server/gameStore'
+import { emitRoleBasedGameUpdates, findGameByCode, persistGame } from '../../../../server/gameStore'
 
 interface SocketServer extends NetServer {
   io?: SocketIOServer
@@ -40,12 +40,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!existingAdmin) {
         // No admin exists, promote the first player
         game.players[0].isAdmin = true
-        
-        // Notify the new admin
-        const resWithSocket = res as NextApiResponseWithSocket
-        if (resWithSocket.socket?.server?.io) {
-          resWithSocket.socket.server.io.to(`player-${code}-${game.players[0].name}`).emit('player-status-update', game.players[0])
-        }
       }
     } else if (!wasAdmin && game.players.length > 0) {
       // Ensure at least one admin exists (safety check)
@@ -58,7 +52,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Broadcast updated game state to all connected clients watching this game
     const resWithSocket = res as NextApiResponseWithSocket
     if (resWithSocket.socket?.server?.io) {
-      resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
+      emitRoleBasedGameUpdates(resWithSocket.socket.server.io, game)
     }
 
     await persistGame(game)

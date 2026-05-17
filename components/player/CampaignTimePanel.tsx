@@ -5,6 +5,8 @@ type CampaignTimePanelProps = {
   onCycleTimeChange: (value: string) => void
   onStartGame: () => void
   playerCount: number
+  canStartGame: boolean
+  startBlockedReason?: string
 }
 
 export default function CampaignTimePanel({
@@ -12,6 +14,8 @@ export default function CampaignTimePanel({
   onCycleTimeChange,
   onStartGame,
   playerCount,
+  canStartGame,
+  startBlockedReason,
 }: CampaignTimePanelProps) {
   return (
     <>
@@ -41,12 +45,12 @@ export default function CampaignTimePanel({
       />
       <ButtonLiquid
         onClick={onStartGame}
-        disabled={playerCount < 4}
+        disabled={!canStartGame}
         style={{ marginTop: 12 }}
       >
         Start Game
       </ButtonLiquid>
-      {playerCount < 4 && (
+      {!canStartGame && (
         <p
           style={{
             color: '#E03E3E',
@@ -55,7 +59,7 @@ export default function CampaignTimePanel({
             fontSize: '0.9em',
           }}
         >
-          Need at least 4 players to start ({playerCount}/4)
+          {startBlockedReason || `Need at least 4 players to start (${playerCount}/4)`}
         </p>
       )}
     </>

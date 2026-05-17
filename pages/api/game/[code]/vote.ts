@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { enrichGame, findGameByCode, persistGame } from '../../../../server/gameStore'
+import { emitRoleBasedGameUpdates, findGameByCode, persistGame } from '../../../../server/gameStore'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 
@@ -182,11 +182,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : null
 
       if (resWithSocket.socket?.server?.io) {
-        resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
+        emitRoleBasedGameUpdates(resWithSocket.socket.server.io, game)
 
         if (game.status === 'final') {
           // Emit winner info for final election
-          resWithSocket.socket.server.io.to(`game-${code}`).emit('game-complete', {
+          resWithSocket.socket.server.io.to(`host-game-${code}`).emit('game-complete', {
             winner: newLeader ? {
               id: newLeader.id,
               name: newLeader.name,
@@ -194,7 +194,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             } : null
           })
         } else {
-          resWithSocket.socket.server.io.to(`game-${code}`).emit('election-results', {
+          resWithSocket.socket.server.io.to(`host-game-${code}`).emit('election-results', {
             leader: newLeader ? {
               id: newLeader.id,
               name: newLeader.name,
@@ -216,6 +216,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         connectedVoters,
         allVotesIn
       })
+
+      // Keep player UIs in sync after each individual vote submission.
+      // This hides the vote panel immediately for voters who just submitted.
+      emitRoleBasedGameUpdates(resWithSocket.socket.server.io, game)
     }
 
     await persistGame(game)

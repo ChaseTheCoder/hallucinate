@@ -100,7 +100,7 @@ export default function HostPage() {
       setConnected(true)
 
       // Re-subscribe on every successful connect (initial + reconnect)
-      socket?.emit('subscribe-to-game', gameCode)
+      socket?.emit('subscribe-to-host', gameCode)
       setIsSubscribed(true)
     }
 
@@ -253,8 +253,10 @@ export default function HostPage() {
   // Keep display values in state so UI updates immediately from live game updates.
   useEffect(() => {
     const nextPlayers = game?.players ?? []
-    const nextQualifiedPlayers = nextPlayers.filter(p => p.isQualified || (game?.status === 'announcement' && !isBarredRevealed && game?.rounds?.[(game?.currentRound || 1) - 1]?.barred?.includes(p.id)))
-    const nextBarredPlayers = nextPlayers.filter(p => !p.isQualified && !(game?.status === 'announcement' && !isBarredRevealed && game?.rounds?.[(game?.currentRound || 1) - 1]?.barred?.includes(p.id)))
+    const currentRoundBarredIds = game?.currentBarredPlayerIds ?? game?.rounds?.[game?.currentRound ?? 0]?.barred ?? []
+    const shouldDelayBarredReveal = game?.status === 'announcement' && !isBarredRevealed
+    const nextQualifiedPlayers = nextPlayers.filter(p => p.isQualified || (shouldDelayBarredReveal && currentRoundBarredIds.includes(p.id)))
+    const nextBarredPlayers = nextPlayers.filter(p => !p.isQualified && !(shouldDelayBarredReveal && currentRoundBarredIds.includes(p.id)))
     const nextSortedBarredPlayers = [...nextBarredPlayers].sort((a, b) => {
       const aRoundIndex = game?.rounds?.findIndex(round => round?.barred?.includes(a.id)) ?? -1
       const bRoundIndex = game?.rounds?.findIndex(round => round?.barred?.includes(b.id)) ?? -1
@@ -314,7 +316,7 @@ export default function HostPage() {
           socket.connect()
         }
         if (socket.connected && gameCode && !isSubscribed) {
-          socket.emit('subscribe-to-game', gameCode)
+          socket.emit('subscribe-to-host', gameCode)
           setIsSubscribed(true)
         }
       }

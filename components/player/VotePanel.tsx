@@ -1,14 +1,12 @@
 import { useState } from 'react'
 import ButtonLiquid from '../ButtonLiquid'
 import VoteButton from '../VoteButton'
-import { Player } from '../../types/types'
 
 interface VotePanelProps {
-  currentPlayer: Player
-  qualifiedPlayers: Player[]
+  candidates: Array<{ id: string; name: string }>
+  requiredVotes: number
   onVoteSubmit: (votes: string[]) => Promise<void>
   isSubmitting: boolean
-  code: string
 }
 
 type VoteSelection = {
@@ -20,20 +18,17 @@ type VoteSelection = {
 const VOTE_VALUES = { first: 5, second: 3, third: 1 }
 
 export default function VotePanel({
-  currentPlayer,
-  qualifiedPlayers,
+  candidates,
+  requiredVotes,
   onVoteSubmit,
   isSubmitting,
-  code
 }: VotePanelProps) {
   const [votes, setVotes] = useState<VoteSelection>({})
   const [error, setError] = useState<string | null>(null)
 
-  if (!currentPlayer || !qualifiedPlayers) {
+  if (!candidates || candidates.length === 0) {
     return <div>Loading...</div>
   }
-
-  const requiredVotes = Math.min(3, qualifiedPlayers.length)
 
   // Determine which position a player occupies in votes
   const getVotePosition = (playerId: string): keyof VoteSelection | null => {
@@ -140,7 +135,7 @@ export default function VotePanel({
           overflowY: 'auto'
         }}
       >
-        {qualifiedPlayers.map(player => {
+        {candidates.map(player => {
           const votePosition = getVotePosition(player.id)
           const voteValue = getVoteValue(votePosition)
 

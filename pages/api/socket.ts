@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import { Server as HTTPServer } from 'http'
 import { Socket as NetSocket } from 'net'
 import { Server as IOServer } from 'socket.io'
-import { enrichGame, findGameByCode, persistGame } from '../../server/gameStore'
+import { buildPlayerProjection, emitRoleBasedGameUpdates, enrichGame, findGameByCode, persistGame } from '../../server/gameStore'
 
 interface SocketServer extends HTTPServer {
   io?: IOServer | undefined
@@ -31,7 +31,22 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
     const socketToPlayer: Map<string, { code: string, playerName: string }> = new Map()
 
     io.on('connection', (socket) => {
-      // Single subscription point - broadcasts complete enriched game state to all clients
+      // Host subscription point - full enriched game state.
+      socket.on('subscribe-to-host', async (code: string) => {
+        const game = await findGameByCode(code)
+        if (!game) {
+          socket.emit('error', 'Game not found')
+          return
+        }
+
+        socket.join(`host-game-${code}`)
+        socket.join(`game-${code}`)
+        
+        // Send enriched game state with computed fields  
+        socket.emit('game-state-update', enrichGame(game))
+      })
+
+      // Backward compatibility for existing host subscriptions.
       socket.on('subscribe-to-game', async (code: string) => {
         const game = await findGameByCode(code)
         if (!game) {
@@ -39,10 +54,8 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
           return
         }
 
-        // Join unified game room
+        socket.join(`host-game-${code}`)
         socket.join(`game-${code}`)
-        
-        // Send enriched game state with computed fields  
         socket.emit('game-state-update', enrichGame(game))
       })
 
@@ -91,7 +104,10 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
 
         await persistGame(game)
 
+        socket.emit('player-projection-update', buildPlayerProjection(enrichGame(game), player))
+
         socket.join(`player-${code}-${resolvedPlayerName}`)
+        socket.join(`game-${code}`)
       })
 
       socket.on('disconnect', async () => {
@@ -113,6 +129,8 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
               })
 
               await persistGame(game)
+
+              emitRoleBasedGameUpdates(io, game)
             }
           }
           socketToPlayer.delete(socket.id)

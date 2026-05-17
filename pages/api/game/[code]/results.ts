@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { enrichGame, findGameByCode, persistGame } from '../../../../server/gameStore'
+import { emitRoleBasedGameUpdates, findGameByCode, persistGame } from '../../../../server/gameStore'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 
@@ -65,10 +65,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Broadcast complete game state with results
     const resWithSocket = res as NextApiResponseWithSocket
     if (resWithSocket.socket?.server?.io) {
-      resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(game))
+      emitRoleBasedGameUpdates(resWithSocket.socket.server.io, game)
 
       // Broadcast detailed results
-      resWithSocket.socket.server.io.to(`game-${code}`).emit('election-results', {
+      resWithSocket.socket.server.io.to(`host-game-${code}`).emit('election-results', {
         leader: {
           id: newLeader.id,
           name: newLeader.name,

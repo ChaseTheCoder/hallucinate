@@ -1,5 +1,6 @@
-import { Game, GameStore } from '../types/types'
+import { Game, GameStore, Player, PlayerProjection } from '../types/types'
 import { Pool } from 'pg'
+import type { Server as SocketIOServer } from 'socket.io'
 
 // Simple in-memory game store
 export const games: GameStore = {}
@@ -212,4 +213,64 @@ export function enrichGame(game: Game): Game {
     adminPlayerId: game.players.find(p => p.isAdmin)?.id ?? undefined,
     currentBarredPlayerIds: game.rounds[game.currentRound]?.barred ?? []
   }
+}
+
+export function buildPlayerProjection(game: Game, player: Player): PlayerProjection {
+  const qualifiedPlayers = game.players.filter(p => p.isQualified)
+  const canVote = game.status === 'vote' && !player.hasVoted
+  const canDecide = game.status === 'decision' && player.leader
+
+  const projection: PlayerProjection = {
+    code: game.code,
+    status: game.status,
+    contentKey: game.status,
+    session: {
+      playerId: player.id,
+      playerName: player.name,
+    },
+    actions: {
+      canVote,
+      canDecide,
+    },
+  }
+
+  if (canVote) {
+    projection.vote = {
+      hasSubmitted: player.hasVoted,
+      requiredVotes: Math.min(3, qualifiedPlayers.length),
+      candidates: qualifiedPlayers.map(p => ({ id: p.id, name: p.name })),
+    }
+  }
+
+  if (canDecide) {
+    projection.decision = {
+      candidates: qualifiedPlayers
+        .filter(p => !p.leader)
+        .map(p => ({ id: p.id, name: p.name })),
+    }
+  }
+
+  if (player.isAdmin) {
+    const connectedPlayers = game.players.filter(p => p.isConnected).length
+    const minPlayersRequired = 4
+    const canStartGame = game.status === 'join' && connectedPlayers >= minPlayersRequired
+    projection.admin = {
+      canStartGame,
+      startBlockedReason: canStartGame ? undefined : `Need at least ${minPlayersRequired} connected players to start`,
+      connectedPlayers,
+      minPlayersRequired,
+    }
+  }
+
+  return projection
+}
+
+export function emitRoleBasedGameUpdates(io: SocketIOServer, game: Game): void {
+  const enriched = enrichGame(game)
+
+  io.to(`host-game-${game.code}`).emit('game-state-update', enriched)
+
+  game.players.forEach(player => {
+    io.to(`player-${game.code}-${player.name}`).emit('player-projection-update', buildPlayerProjection(enriched, player))
+  })
 }

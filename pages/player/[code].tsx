@@ -2,14 +2,13 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import io, { Socket } from 'socket.io-client'
 import ButtonLiquid from '../../components/ButtonLiquid'
-import VoteButton from '../../components/VoteButton'
 import VotePanel from '../../components/player/VotePanel'
 import PlayerHeader from '../../components/player/PlayerHeader'
 import LeaderDecisionPanel from '../../components/player/LeaderDecisionPanel'
 import CampaignTimePanel from '../../components/player/CampaignTimePanel'
 import Popover from '../../components/Popover'
 import { gameContent } from '../../content/content'
-import { Player } from '../../types/types'
+import { PlayerProjection, StatusTypes } from '../../types/types'
 import { submitVote } from '../../utils/player/submitVote'
 import { leaveGame } from '../../utils/player/leaveGame'
 import submitDecision from '../../utils/player/submitDecision'
@@ -30,11 +29,9 @@ export default function PlayerPage() {
   const playerName = Array.isArray(name) ? name[0] : name
 
   const [loading, setLoading] = useState(true)
-  const [gameStatus, setGameStatus] = useState<string | null>(null)
+  const [gameStatus, setGameStatus] = useState<StatusTypes | null>(null)
   const [playerMessage, setPlayerMessage] = useState<string | null>(null)
   const [gameExists, setGameExists] = useState(true)
-  const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null)
-  const [allPlayers, setAllPlayers] = useState<Player[]>([])
   const [hasVoted, setHasVoted] = useState(false)
   const [isSubmittingVote, setIsSubmittingVote] = useState(false)
   const [decisionSelection, setDecisionSelection] = useState<string | null>(null)
@@ -42,61 +39,93 @@ export default function PlayerPage() {
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false)
   const [cycleTimeInput, setCycleTimeInput] = useState<string>('10')
   const [cycleTimeSet, setCycleTimeSet] = useState(false)
-  const [timeRemaining, setTimeRemaining] = useState<string>('')
-  const [electionCycleStartTime, setElectionCycleStartTime] = useState<number>(0)
-  const [cycleTime, setCycleTime] = useState<number>(10)
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('disconnected')
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
-  const [isLeader, setIsLeader] = useState(false)
-  const [qualifiedPlayers, setQualifiedPlayers] = useState<Player[]>([])
-  const [decisionCandidates, setDecisionCandidates] = useState<Player[]>([])
+  const [canVote, setCanVote] = useState(false)
+  const [canDecide, setCanDecide] = useState(false)
+  const [voteCandidates, setVoteCandidates] = useState<Array<{ id: string; name: string }>>([])
+  const [decisionCandidates, setDecisionCandidates] = useState<Array<{ id: string; name: string }>>([])
+  const [requiredVotes, setRequiredVotes] = useState(0)
+  const [canStartGame, setCanStartGame] = useState(false)
+  const [connectedPlayers, setConnectedPlayers] = useState(0)
+  const [startBlockedReason, setStartBlockedReason] = useState<string | undefined>(undefined)
   const [showLeaveGamePopover, setShowLeaveGamePopover] = useState(false)
 
-  // Initialize session data from URL and localStorage
+  const applyProjection = (projection: PlayerProjection) => {
+    setGameStatus(projection.status)
+    setHasVoted(projection.vote?.hasSubmitted ?? false)
+
+    setCanVote(projection.actions.canVote)
+    setCanDecide(projection.actions.canDecide)
+
+    setVoteCandidates(projection.vote?.candidates ?? [])
+    setRequiredVotes(projection.vote?.requiredVotes ?? 0)
+
+    setDecisionCandidates(projection.decision?.candidates ?? [])
+
+    setIsAdmin(Boolean(projection.admin))
+    setCanStartGame(Boolean(projection.admin?.canStartGame))
+    setConnectedPlayers(projection.admin?.connectedPlayers ?? 0)
+    setStartBlockedReason(projection.admin?.startBlockedReason)
+
+    setSessionData(prev => {
+      const nextSession: SessionData = {
+        code: projection.code,
+        playerId: projection.session.playerId,
+        playerName: projection.session.playerName,
+      }
+      if (
+        prev
+        && prev.code === nextSession.code
+        && prev.playerId === nextSession.playerId
+        && prev.playerName === nextSession.playerName
+      ) {
+        return prev
+      }
+      localStorage.setItem('playerSession', JSON.stringify(nextSession))
+      return nextSession
+    })
+  }
+
+  // Initialize session data from URL/localStorage and fetch player projection.
   useEffect(() => {
     if (!gameCode || !playerName) return
 
-    // Try to restore session from localStorage
-    const storedSession = localStorage.getItem('playerSession')
-    const session: SessionData = storedSession && JSON.parse(storedSession).code === gameCode
-      ? JSON.parse(storedSession)
-      : { code: gameCode, playerId: '', playerName: playerName }
+    const storedSessionRaw = localStorage.getItem('playerSession')
+    let storedSession: SessionData | null = null
+    if (storedSessionRaw) {
+      try {
+        const parsed = JSON.parse(storedSessionRaw)
+        if (parsed?.code === gameCode && typeof parsed?.playerName === 'string' && typeof parsed?.playerId === 'string') {
+          storedSession = parsed
+        }
+      } catch {
+        storedSession = null
+      }
+    }
 
+    const session: SessionData = storedSession ?? { code: gameCode, playerId: '', playerName }
     setSessionData(session)
     localStorage.setItem('playerSession', JSON.stringify(session))
 
-    // Fetch initial game state
-    fetch(`/api/game/${gameCode}`)
-      .then(res => {
+    const identifierQuery = session.playerId
+      ? `playerId=${encodeURIComponent(session.playerId)}`
+      : `playerName=${encodeURIComponent(session.playerName)}`
+
+    fetch(`/api/game/${gameCode}?role=player&${identifierQuery}`, { cache: 'no-store' })
+      .then(async res => {
         if (!res.ok) {
           setGameExists(false)
           setLoading(false)
-          return
+          return null
         }
         return res.json()
       })
       .then(data => {
         if (!data) return
-        
         setGameExists(true)
-        setGameStatus(data.status)
-        setAllPlayers(data.players || [])
-        
-        if (data.electionCycleStartTime !== undefined) {
-          setElectionCycleStartTime(data.electionCycleStartTime)
-        }
-        if (data.cycleTime !== undefined) {
-          setCycleTime(data.cycleTime)
-        }
-        
-        // Update current player info
-        const updatedCurrentPlayer = data.players?.find((p: Player) => p.name === playerName)
-        if (updatedCurrentPlayer) {
-          setCurrentPlayer(updatedCurrentPlayer)
-          setHasVoted(updatedCurrentPlayer.hasVoted)
-        }
-        
+        applyProjection(data as PlayerProjection)
         setLoading(false)
       })
       .catch(() => {
@@ -105,7 +134,7 @@ export default function PlayerPage() {
       })
   }, [gameCode, playerName])
 
-  // Establish and maintain socket connection with mobile resilience
+  // Establish and maintain socket connection with role-specific player projection updates.
   useEffect(() => {
     if (!gameCode || !sessionData) return
 
@@ -114,125 +143,68 @@ export default function PlayerPage() {
     }
 
     const establishConnection = () => {
-      // Single subscription for game state
-      socket!.emit('subscribe-to-game', gameCode)
-
-      // Subscribe to player-specific updates using playerId when available
-      const playerSubscription = sessionData.playerId
+      const payload = sessionData.playerId
         ? { code: gameCode, playerId: sessionData.playerId }
         : { code: gameCode, playerName: sessionData.playerName }
-      socket!.emit('subscribe-to-player', playerSubscription)
+      socket?.emit('subscribe-to-player', payload)
     }
 
-    // Monitor socket connection events
     const handleConnect = () => {
-      console.log('[Socket] Connected')
       setConnectionStatus('connected')
       establishConnection()
     }
 
     const handleDisconnect = () => {
-      console.log('[Socket] Disconnected')
       setConnectionStatus(socket?.active ? 'reconnecting' : 'disconnected')
     }
 
-    const handleConnectError = (error: Error) => {
-      console.error('[Socket] connect_error:', error)
+    const handleConnectError = () => {
       setConnectionStatus(socket?.active ? 'reconnecting' : 'disconnected')
+    }
+
+    const handleProjection = (data: PlayerProjection) => {
+      applyProjection(data)
+    }
+
+    const handleGameDeleted = () => {
+      setGameExists(false)
     }
 
     socket.on('connect', handleConnect)
     socket.on('disconnect', handleDisconnect)
     socket.on('connect_error', handleConnectError)
+    socket.on('player-projection-update', handleProjection)
+    socket.on('game-deleted', handleGameDeleted)
 
-    // Listen for game state updates
-    socket.on('game-state-update', (data: { players: Player[], status: string, barredPlayerName?: string | null, electionCycleStartTime?: number, cycleTime?: number }) => {
-      setGameStatus(data.status)
-      setAllPlayers(data.players)
-      if (data.electionCycleStartTime !== undefined) {
-        setElectionCycleStartTime(data.electionCycleStartTime)
-      }
-      if (data.cycleTime !== undefined) {
-        setCycleTime(data.cycleTime)
-      }
-
-      // Update current player info
-      const updatedCurrentPlayer = data.players.find(p => p.name === sessionData.playerName)
-      if (updatedCurrentPlayer) {
-        setCurrentPlayer(updatedCurrentPlayer)
-        setHasVoted(updatedCurrentPlayer.hasVoted)
-      }
-    })
-
-    // Listen for player status updates
-    socket.on('player-status-update', (player: Player) => {
-      setCurrentPlayer(player)
-      setHasVoted(player.hasVoted)
-      // Store player ID in session when first received
-      if (!sessionData.playerId && player.id) {
-        const updated = { ...sessionData, playerId: player.id }
-        setSessionData(updated)
-        localStorage.setItem('playerSession', JSON.stringify(updated))
-      }
-    })
-
-    // Listen for game deletion
-    socket.on('game-deleted', () => {
-      setGameExists(false)
-    })
-
-    // Listen for player disconnection/reconnection events (for diagnostics)
-    socket.on('player-disconnected', (data: { playerName: string }) => {
-      if (data.playerName === sessionData.playerName) {
-        console.log('[Socket] Self disconnection detected')
-      }
-    })
-
-    socket.on('player-reconnected', (data: { playerName: string }) => {
-      if (data.playerName === sessionData.playerName) {
-        console.log('[Socket] Self reconnection detected - reestablishing subscriptions')
-        establishConnection()
-      }
-    })
-
-    // Establish connection if not already connected
     if (socket.connected) {
       handleConnect()
     }
 
-    // Cleanup on unmount
     return () => {
-      if (socket) {
-        socket.off('connect', handleConnect)
-        socket.off('disconnect', handleDisconnect)
-        socket.off('connect_error', handleConnectError)
-        socket.off('game-state-update')
-        socket.off('player-status-update')
-        socket.off('game-deleted')
-        socket.off('player-disconnected')
-        socket.off('player-reconnected')
-      }
+      if (!socket) return
+      socket.off('connect', handleConnect)
+      socket.off('disconnect', handleDisconnect)
+      socket.off('connect_error', handleConnectError)
+      socket.off('player-projection-update', handleProjection)
+      socket.off('game-deleted', handleGameDeleted)
     }
   }, [gameCode, sessionData])
 
-  // Page visibility handler - critical for mobile background/foreground transitions
+  // Re-subscribe after returning from background.
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        console.log('[Visibility] Page hidden - mobile screen may have locked')
-      } else {
-        console.log('[Visibility] Page visible - reconnecting after background')
-        // Reconnect socket when page becomes visible
-        if (socket && !socket.connected) {
-          console.log('[Visibility] Socket disconnected while in background, attempting reconnect')
-          socket.connect()
-        } else if (socket && socket.connected && sessionData) {
-          // Re-establish subscriptions even if socket is already connected
-          console.log('[Visibility] Re-establishing subscriptions')
-          socket.emit('subscribe-to-game', gameCode)
-          socket.emit('subscribe-to-player', { code: gameCode, playerName: sessionData.playerName })
-        }
+      if (document.hidden) return
+      if (!socket || !sessionData) return
+
+      if (!socket.connected) {
+        socket.connect()
+        return
       }
+
+      const payload = sessionData.playerId
+        ? { code: gameCode, playerId: sessionData.playerId }
+        : { code: gameCode, playerName: sessionData.playerName }
+      socket.emit('subscribe-to-player', payload)
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -247,18 +219,13 @@ export default function PlayerPage() {
       return
     }
 
-    if (gameStatus === 'decision' && currentPlayer?.leader) {
+    if (gameStatus === 'decision' && canDecide) {
       setPlayerMessage(gameContent.decision.leaderMessage || null)
       return
     }
 
-    let message = gameContent[gameStatus]?.playerMessage || null
-    if (gameStatus === 'campaign' && timeRemaining) {
-      message = `${message} Time remaining: ${timeRemaining}`
-    }
-
-    setPlayerMessage(message)
-  }, [gameStatus, hasVoted, currentPlayer?.leader, timeRemaining])
+    setPlayerMessage(gameContent[gameStatus]?.playerMessage || null)
+  }, [gameStatus, hasVoted, canDecide])
 
   useEffect(() => {
     if (gameStatus !== 'decision') {
@@ -267,44 +234,12 @@ export default function PlayerPage() {
     }
   }, [gameStatus])
 
-  useEffect(() => {
-    const nextIsAdmin = currentPlayer?.isAdmin || false
-    const nextIsLeader = currentPlayer?.leader || false
-    const nextQualifiedPlayers = allPlayers.filter(p => p.isQualified)
-    const nextDecisionCandidates = nextQualifiedPlayers.filter(p => !p.leader)
-
-    setIsAdmin(nextIsAdmin)
-    setIsLeader(nextIsLeader)
-    setQualifiedPlayers(nextQualifiedPlayers)
-    setDecisionCandidates(nextDecisionCandidates)
-  }, [currentPlayer, allPlayers])
-
-  // Countdown timer for campaign
-  useEffect(() => {
-    if (gameStatus !== 'campaign' || electionCycleStartTime === 0) {
-      setTimeRemaining('')
-      return
-    }
-
-    const updateTime = () => {
-      const elapsed = Math.floor((Date.now() - electionCycleStartTime) / 1000)
-      const remaining = Math.max(0, cycleTime - elapsed)
-      const minutes = Math.floor(remaining / 60)
-      const seconds = remaining % 60
-      setTimeRemaining(`${minutes}:${seconds.toString().padStart(2, '0')}`)
-    }
-
-    updateTime()
-    const interval = setInterval(updateTime, 1000)
-    return () => clearInterval(interval)
-  }, [gameStatus, electionCycleStartTime, cycleTime])
-
   const handleSubmitVote = async (votes: string[]) => {
-    if (!gameCode || !currentPlayer) return
+    if (!gameCode || !sessionData?.playerId) return
 
     setIsSubmittingVote(true)
     try {
-      await submitVote(gameCode, currentPlayer.id, votes)
+      await submitVote(gameCode, sessionData.playerId, votes)
       setHasVoted(true)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to submit vote'
@@ -315,7 +250,7 @@ export default function PlayerPage() {
   }
 
   const handleSubmitDecision = async () => {
-    if (!gameCode || !currentPlayer) return
+    if (!gameCode || !sessionData?.playerId) return
 
     if (!decisionSelection) {
       setDecisionError('Select a player to bar from election')
@@ -324,7 +259,7 @@ export default function PlayerPage() {
 
     setIsSubmittingDecision(true)
     try {
-      await submitDecision(gameCode, currentPlayer.id, decisionSelection)
+      await submitDecision(gameCode, sessionData.playerId, decisionSelection)
       setDecisionSelection(null)
       setDecisionError(null)
     } catch (error) {
@@ -343,13 +278,12 @@ export default function PlayerPage() {
     if (gameCode && sessionData?.playerName) {
       await leaveGame(gameCode, sessionData.playerName)
     }
-    // Clear stored session info
     localStorage.removeItem('playerSession')
     router.push('/')
   }
 
   const handleStartGameClick = async () => {
-    if (!gameCode) return
+    if (!gameCode || !canStartGame) return
 
     try {
       const body: { cycleTime?: number } = {}
@@ -368,7 +302,6 @@ export default function PlayerPage() {
         setCycleTimeSet(true)
       }
     } catch (error) {
-      console.error('Error starting game:', error)
       const message = error instanceof Error ? error.message : 'Failed to start game'
       alert(message)
     }
@@ -406,7 +339,6 @@ export default function PlayerPage() {
         gap: 12
       }}
     >
-      {/* Connection Status Indicator - Mobile Resilience Feedback */}
       <div
         style={{
           position: 'fixed',
@@ -425,14 +357,12 @@ export default function PlayerPage() {
         {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'reconnecting' ? 'Reconnecting...' : 'Disconnected'}
       </div>
 
-      {/* Header */}
       <PlayerHeader
-        playerName={playerName}
+        playerName={sessionData?.playerName || playerName}
         isAdmin={isAdmin}
         onLeaveGame={handleLeaveGameClick}
       />
 
-      {/* Main Content */}
       <div
         style={{
           display: 'flex',
@@ -440,15 +370,14 @@ export default function PlayerPage() {
           flex: 1
         }}
       >
-        {gameStatus === 'vote' && !hasVoted && currentPlayer && qualifiedPlayers.length > 0 ? (
+        {canVote && voteCandidates.length > 0 ? (
           <VotePanel
-            currentPlayer={currentPlayer}
-            qualifiedPlayers={qualifiedPlayers}
+            candidates={voteCandidates}
+            requiredVotes={requiredVotes}
             onVoteSubmit={handleSubmitVote}
             isSubmitting={isSubmittingVote}
-            code={gameCode as string}
           />
-        ) : gameStatus === 'decision' && isLeader ? (
+        ) : canDecide ? (
           <LeaderDecisionPanel
             playerMessage={playerMessage}
             decisionError={decisionError}
@@ -469,22 +398,24 @@ export default function PlayerPage() {
             }}
           >
             <p style={{ color: '#5A5A5A', textAlign: 'center', margin: 0 }}>
-              {playerMessage || 'null...'}
+              {playerMessage || 'Waiting...'}
             </p>
             {isAdmin && gameStatus === 'join' && !cycleTimeSet && (
               <CampaignTimePanel
                 cycleTimeInput={cycleTimeInput}
                 onCycleTimeChange={setCycleTimeInput}
                 onStartGame={handleStartGameClick}
-                playerCount={allPlayers.length}
+                playerCount={connectedPlayers}
+                canStartGame={canStartGame}
+                startBlockedReason={startBlockedReason}
               />
             )}
           </div>
         )}
       </div>
 
-      <Popover 
-        isOpen={showLeaveGamePopover} 
+      <Popover
+        isOpen={showLeaveGamePopover}
         onClose={() => setShowLeaveGamePopover(false)}
         title="Are you sure you want to leave this game?"
         confirmText="Confirm Leave Game"

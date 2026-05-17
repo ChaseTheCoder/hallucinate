@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { enrichGame, findGameByCode, getClientIp, persistGame } from '../../../../server/gameStore'
+import { emitRoleBasedGameUpdates, findGameByCode, getClientIp, persistGame } from '../../../../server/gameStore'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 import { Game, Player } from '../../../../types/types'
@@ -77,7 +77,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Broadcast updated game state to all connected clients watching this game
     const resWithSocket = res as NextApiResponseWithSocket
     if (resWithSocket.socket?.server?.io) {
-      resWithSocket.socket.server.io.to(`game-${code}`).emit('game-state-update', enrichGame(typedGame))
+      emitRoleBasedGameUpdates(resWithSocket.socket.server.io, typedGame)
     }
 
     res.status(200).json({ success: true, players: typedGame.players, player: newPlayer })
