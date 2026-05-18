@@ -72,6 +72,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           p.hasVoted = false
         })
         game.currentRound += 1
+        // Clear executive decision fields so the next round starts clean
+        delete game.executiveDecision
+        delete game.executiveDecisionTargetId
       }
     }
 

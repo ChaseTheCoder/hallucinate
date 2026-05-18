@@ -8,7 +8,7 @@ import LeaderDecisionPanel from '../../components/player/LeaderDecisionPanel'
 import CampaignTimePanel from '../../components/player/CampaignTimePanel'
 import Popover from '../../components/Popover'
 import { gameContent } from '../../content/content'
-import { PlayerProjection, StatusTypes } from '../../types/types'
+import { ExecutiveDecisionType, PlayerProjection, StatusTypes } from '../../types/types'
 import { submitVote } from '../../utils/player/submitVote'
 import { leaveGame } from '../../utils/player/leaveGame'
 import submitDecision from '../../utils/player/submitDecision'
@@ -34,7 +34,6 @@ export default function PlayerPage() {
   const [gameExists, setGameExists] = useState(true)
   const [hasVoted, setHasVoted] = useState(false)
   const [isSubmittingVote, setIsSubmittingVote] = useState(false)
-  const [decisionSelection, setDecisionSelection] = useState<string | null>(null)
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false)
   const [cycleTimeInput, setCycleTimeInput] = useState<string>('10')
@@ -229,7 +228,6 @@ export default function PlayerPage() {
 
   useEffect(() => {
     if (gameStatus !== 'decision') {
-      setDecisionSelection(null)
       setDecisionError(null)
     }
   }, [gameStatus])
@@ -249,19 +247,12 @@ export default function PlayerPage() {
     }
   }
 
-  const handleSubmitDecision = async () => {
+  const handleSubmitDecision = async (barredId: string, ed: ExecutiveDecisionType, edTargetId?: string) => {
     if (!gameCode || !sessionData?.playerId) return
-
-    if (!decisionSelection) {
-      setDecisionError('Select a player to bar from election')
-      return
-    }
-
     setIsSubmittingDecision(true)
+    setDecisionError(null)
     try {
-      await submitDecision(gameCode, sessionData.playerId, decisionSelection)
-      setDecisionSelection(null)
-      setDecisionError(null)
+      await submitDecision(gameCode, sessionData.playerId, barredId, ed, edTargetId)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to submit decision'
       setDecisionError(message)
@@ -379,13 +370,10 @@ export default function PlayerPage() {
           />
         ) : canDecide ? (
           <LeaderDecisionPanel
-            playerMessage={playerMessage}
             decisionError={decisionError}
             decisionCandidates={decisionCandidates}
-            decisionSelection={decisionSelection}
             isSubmittingDecision={isSubmittingDecision}
-            onSelectDecision={setDecisionSelection}
-            onSubmitDecision={handleSubmitDecision}
+            onSubmitFinalDecision={handleSubmitDecision}
           />
         ) : (
           <div

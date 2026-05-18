@@ -20,6 +20,8 @@ export interface GameRound {
 
 export type StatusTypes = 'join' | 'rules' | 'campaign' | 'vote' | 'results' | 'decision' | 'announcement' | 'final'
 
+export type ExecutiveDecisionType = 'bar_another' | 'opt_out'
+
 export interface Game {
   id: string // UUID
   code: string
@@ -32,6 +34,9 @@ export interface Game {
   electionCycleStartTime: number // timestamp for countdown
   winner?: string | undefined; // Player ID of winner
   createdAt: number
+  // Executive decision fields (set after leader submits decision)
+  executiveDecision?: ExecutiveDecisionType
+  executiveDecisionTargetId?: string // Player ID barred by ED1
   // Computed fields for efficient lookups
   adminPlayerId?: string // ID of the player with isAdmin = true
   currentBarredPlayerIds?: string[] // IDs of players barred in current round

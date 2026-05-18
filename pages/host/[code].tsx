@@ -8,7 +8,7 @@ import Right from '../../components/host/Right'
 import Popover from '../../components/Popover'
 import ButtonLiquid from '../../components/ButtonLiquid'
 import { Game } from '../../types/types'
-import { gameContent } from '../../content/content'
+import { gameContent, ed1AnnouncementExtension } from '../../content/content'
 import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment } from '../../content/hostNarration'
 import updateGame from '../../utils/updateGame'
 
@@ -43,10 +43,12 @@ export default function HostPage() {
   const [loserPoints, setLoserPoints] = useState<number>(0)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [latestBarredName, setLatestBarredName] = useState<string | null>(null)
+  const [secondBarredName, setSecondBarredName] = useState<string | null>(null)
   const [displayedHostMessages, setDisplayedHostMessages] = useState<string[]>(['Loading...'])
   const [displayedMessageIndices, setDisplayedMessageIndices] = useState<number[]>([0])
   const [isLeaderRevealed, setIsLeaderRevealed] = useState(false)
   const [isBarredRevealed, setIsBarredRevealed] = useState(false)
+  const [isED1BarredRevealed, setIsED1BarredRevealed] = useState(false)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [audioRetryTick, setAudioRetryTick] = useState(0)
   const [audioAmplitude, setAudioAmplitude] = useState<number>(0)
@@ -126,8 +128,9 @@ export default function HostPage() {
       setLoadError(null)
 
       if (data.currentBarredPlayerIds && data.currentBarredPlayerIds.length > 0) {
-        const latestBarredId = data.currentBarredPlayerIds[data.currentBarredPlayerIds.length - 1]
-        const barredPlayer = data.players.find(p => p.id === latestBarredId)
+        // Keep the primary barred player (leader's direct choice) for {PLAYER_NAME}.
+        const primaryBarredId = data.currentBarredPlayerIds[0]
+        const barredPlayer = data.players.find(p => p.id === primaryBarredId)
         setBarredPlayerName(barredPlayer?.name ?? null)
       } else {
         setBarredPlayerName(null)
@@ -245,18 +248,50 @@ export default function HostPage() {
     setIsLeaderRevealed(
       (game?.status === 'results' || game?.status === 'final') ? hasReachedLastMessage : true
     )
+
+    // isBarredRevealed fires when the FIRST barred name message is reached.
+    // For ED1, that is index (originalLength - 1); for standard announcement it is also the last message.
+    const originalAnnouncementLength = gameContent.announcement.hostMessage.length
+    const hasReachedFirstBarredMessage = hasLoadedCurrentStatusContent
+      && Array.isArray(content?.hostMessage)
+      && messageIndex >= originalAnnouncementLength - 1
     setIsBarredRevealed(
-      game?.status === 'announcement' && hasReachedLastMessage
+      game?.status === 'announcement' && hasReachedFirstBarredMessage
     )
-  }, [game?.status, content?.hostMessage, messageIndex])
+
+    // isED1BarredRevealed fires when the extended ED1 sequence reaches the second barred name.
+    setIsED1BarredRevealed(
+      game?.status === 'announcement'
+      && game?.executiveDecision === 'bar_another'
+      && hasReachedLastMessage
+    )
+  }, [game?.status, game?.executiveDecision, content?.hostMessage, messageIndex])
 
   // Keep display values in state so UI updates immediately from live game updates.
   useEffect(() => {
     const nextPlayers = game?.players ?? []
     const currentRoundBarredIds = game?.currentBarredPlayerIds ?? game?.rounds?.[game?.currentRound ?? 0]?.barred ?? []
-    const shouldDelayBarredReveal = game?.status === 'announcement' && !isBarredRevealed
-    const nextQualifiedPlayers = nextPlayers.filter(p => p.isQualified || (shouldDelayBarredReveal && currentRoundBarredIds.includes(p.id)))
-    const nextBarredPlayers = nextPlayers.filter(p => !p.isQualified && !(shouldDelayBarredReveal && currentRoundBarredIds.includes(p.id)))
+    const isAnnouncementStatus = game?.status === 'announcement'
+
+    // Primary barred player: stays in qualified list until isBarredRevealed
+    const primaryBarredId = game?.currentBarredPlayerIds?.[0] ?? null
+    // ED1 secondary barred player: stays in qualified list until isED1BarredRevealed
+    const ed1BarredId = game?.executiveDecision === 'bar_another' ? (game?.executiveDecisionTargetId ?? null) : null
+
+    const isCurrentRoundBarredPlayer = (playerId: string) => currentRoundBarredIds.includes(playerId)
+    const shouldHideAsBarred = (playerId: string): boolean => {
+      if (!isAnnouncementStatus) return false
+      if (playerId === primaryBarredId && !isBarredRevealed) return true
+      if (playerId === ed1BarredId && !isED1BarredRevealed) return true
+      return false
+    }
+
+    const nextQualifiedPlayers = nextPlayers.filter(p =>
+      p.isQualified || (isCurrentRoundBarredPlayer(p.id) && shouldHideAsBarred(p.id))
+    )
+    const nextBarredPlayers = nextPlayers.filter(p =>
+      !p.isQualified && !shouldHideAsBarred(p.id)
+    )
     const nextSortedBarredPlayers = [...nextBarredPlayers].sort((a, b) => {
       const aRoundIndex = game?.rounds?.findIndex(round => round?.barred?.includes(a.id)) ?? -1
       const bRoundIndex = game?.rounds?.findIndex(round => round?.barred?.includes(b.id)) ?? -1
@@ -276,6 +311,10 @@ export default function HostPage() {
     const totalQualified = nextQualifiedPlayers.length
     const nextVoteProgress = game?.status === 'vote' ? `${votedCount}/${totalQualified}` : null
 
+    // Derive second barred name for ED1 announcement
+    const nextSecondBarred = ed1BarredId ? nextPlayers.find(p => p.id === ed1BarredId) : null
+    setSecondBarredName(nextSecondBarred?.name ?? null)
+
     let nextTimeRemaining = ''
     if (game?.status === 'campaign' && remainingSeconds > 0) {
       const minutes = Math.floor(remainingSeconds / 60)
@@ -291,7 +330,7 @@ export default function HostPage() {
     setWinnerName(nextWinnerName)
     setWinnerPoints(nextWinnerPoints)
     setLoserPoints(nextLoserPoints)
-  }, [game, remainingSeconds, isBarredRevealed])
+  }, [game, remainingSeconds, isBarredRevealed, isED1BarredRevealed])
 
   useEffect(() => {
     setIsLoading(!game)
@@ -326,21 +365,43 @@ export default function HostPage() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [gameCode, isSubscribed])
 
-  // Update host messages based on game status
+  // Update host messages based on game status; extend announcement for ED1.
   useEffect(() => {
     if (game?.status) {
       const gameStatus = game.status as keyof typeof gameContent
-      setContent(gameContent[gameStatus])
+      const baseContent = gameContent[gameStatus]
+      if (game.status === 'announcement' && game.executiveDecision === 'bar_another') {
+        setContent({
+          ...baseContent,
+          hostMessage: [
+            ...(baseContent.hostMessage as string[]),
+            ...ed1AnnouncementExtension
+          ]
+        } as typeof baseContent)
+      } else {
+        setContent(baseContent)
+      }
       setMessageIndex(0)
     }
-  }, [game?.status])
+  }, [game?.status, game?.executiveDecision])
 
   // Play narration for each indexed host message and resolve after the segment delay.
   useEffect(() => {
     if (!game?.status || !Array.isArray(content?.hostMessage) || messageIndex >= content.hostMessage.length) return
 
     const segment = getHostNarrationSegment(game.status, messageIndex)
-    const delayMs = segment?.pauseAfterMs ?? DEFAULT_HOST_PAUSE_MS
+    // For ED1 extended announcement messages (beyond original content.ts length),
+    // segment will be null — apply dramatic pause for the second-to-last and last messages.
+    let delayMs = segment?.pauseAfterMs ?? DEFAULT_HOST_PAUSE_MS
+    if (
+      game.status === 'announcement' &&
+      game.executiveDecision === 'bar_another' &&
+      !segment
+    ) {
+      const isLastMsg = messageIndex === content.hostMessage.length - 1
+      const isSecondToLastMsg = messageIndex === content.hostMessage.length - 2
+      if (isLastMsg || isSecondToLastMsg) delayMs = 8000
+    }
     const isLastMessage = messageIndex >= content.hostMessage.length - 1
     const shouldAutoTransition = AUTO_TRANSITION_STATUSES.includes(game.status)
 
@@ -526,6 +587,7 @@ export default function HostPage() {
         msg
           .replace('{LEADER_NAME}', leaderName || 'TBD')
           .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
+          .replace('{ED1_PLAYER_NAME}', secondBarredName || 'TBD')
           .replace('{TIME}', timeRemaining || 'TBD')
           .replace('{VOTE_PROGRESS}', voteProgress || '0/0')
           .replace('{WINNER_NAME}', winnerName)

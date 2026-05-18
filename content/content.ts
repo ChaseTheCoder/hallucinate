@@ -1,3 +1,12 @@
+// Extra announcement messages appended when the leader chose Executive Decision 1 (bar another).
+// These are appended to the standard announcement.hostMessage array on the host page.
+export const ed1AnnouncementExtension: string[] = [
+  "Your leader also made an executive decision to...",
+  "bar another candidate...",
+  "and that candidate is....",
+  "{ED1_PLAYER_NAME}"
+]
+
 export const gameContent = {
   join: {
     playerMessage: "Waiting for fellow candidates to join...",

@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import { emitRoleBasedGameUpdates, findGameByCode, persistGame } from '../../../../server/gameStore'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
+import type { ExecutiveDecisionType } from '../../../../types/types'
 
 interface SocketServer extends NetServer {
   io?: SocketIOServer
@@ -18,6 +19,8 @@ interface NextApiResponseWithSocket extends NextApiResponse {
 interface DecisionSubmission {
   leaderId: string
   barredId: string
+  executiveDecision: ExecutiveDecisionType
+  execDecisionTargetId?: string // Required when executiveDecision === 'bar_another'
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -27,10 +30,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const { code } = req.query
-  const { leaderId, barredId } = req.body as DecisionSubmission
+  const { leaderId, barredId, executiveDecision, execDecisionTargetId } = req.body as DecisionSubmission
 
-  if (!leaderId || !barredId) {
-    return res.status(400).json({ error: 'Missing leaderId or barredId' })
+  if (!leaderId || !barredId || !executiveDecision) {
+    return res.status(400).json({ error: 'Missing leaderId, barredId, or executiveDecision' })
+  }
+
+  if (!['bar_another', 'opt_out'].includes(executiveDecision)) {
+    return res.status(400).json({ error: 'Invalid executiveDecision value' })
   }
 
   const game = await findGameByCode(code as string)
@@ -60,12 +67,49 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Leader cannot bar themselves' })
   }
 
+  // Apply primary bar
   barredPlayer.isQualified = false
   barredPlayer.roundsBarred += 1
   barredPlayer.votes = 0
 
   if (game.rounds[game.currentRound]) {
     game.rounds[game.currentRound].barred.push(barredPlayer.id)
+  }
+
+  // Store executive decision
+  game.executiveDecision = executiveDecision
+
+  // Handle ED1: bar a second qualified player
+  let ed1BarredPlayer: typeof game.players[0] | null = null
+  if (executiveDecision === 'bar_another') {
+    if (!execDecisionTargetId) {
+      return res.status(400).json({ error: 'execDecisionTargetId required for bar_another' })
+    }
+
+    const edTarget = game.players.find(p => p.id === execDecisionTargetId)
+    if (!edTarget) {
+      return res.status(404).json({ error: 'Executive decision target player not found' })
+    }
+    if (!edTarget.isQualified) {
+      return res.status(400).json({ error: 'Executive decision target is already barred' })
+    }
+    if (edTarget.id === leader.id) {
+      return res.status(400).json({ error: 'Leader cannot bar themselves via executive decision' })
+    }
+    if (edTarget.id === barredPlayer.id) {
+      return res.status(400).json({ error: 'Cannot bar the same player twice' })
+    }
+
+    edTarget.isQualified = false
+    edTarget.roundsBarred += 1
+    edTarget.votes = 0
+
+    if (game.rounds[game.currentRound]) {
+      game.rounds[game.currentRound].barred.push(edTarget.id)
+    }
+
+    game.executiveDecisionTargetId = edTarget.id
+    ed1BarredPlayer = edTarget
   }
 
   game.status = 'announcement'
@@ -80,9 +124,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.status(200).json({
     success: true,
     status: game.status,
+    executiveDecision,
     barred: {
       id: barredPlayer.id,
       name: barredPlayer.name
-    }
+    },
+    ...(ed1BarredPlayer !== null ? {
+      ed1Barred: {
+        id: ed1BarredPlayer.id,
+        name: ed1BarredPlayer.name
+      }
+    } : {})
   })
 }
