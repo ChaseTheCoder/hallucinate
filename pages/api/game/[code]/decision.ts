@@ -36,7 +36,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Missing leaderId, barredId, or executiveDecision' })
   }
 
-  if (!['bar_another', 'self_immunity_next_cycle', 'opt_out'].includes(executiveDecision)) {
+  if (!['bar_another', 'self_immunity_next_cycle', 'grant_immunity_next_cycle', 'opt_out'].includes(executiveDecision)) {
     return res.status(400).json({ error: 'Invalid executiveDecision value' })
   }
 
@@ -124,6 +124,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     leader.immuneFromBarInRound = game.currentRound + 1
   }
 
+  // Handle ED3: grant another qualified player immunity for next cycle's decision round.
+  let immunityGrantedPlayer: typeof game.players[0] | null = null
+  if (executiveDecision === 'grant_immunity_next_cycle') {
+    if (!execDecisionTargetId) {
+      return res.status(400).json({ error: 'execDecisionTargetId required for grant_immunity_next_cycle' })
+    }
+
+    const immunityTarget = game.players.find(p => p.id === execDecisionTargetId)
+    if (!immunityTarget) {
+      return res.status(404).json({ error: 'Immunity target player not found' })
+    }
+    if (immunityTarget.id === leader.id) {
+      return res.status(400).json({ error: 'Leader cannot grant fellow immunity to themselves' })
+    }
+    if (!immunityTarget.isQualified) {
+      return res.status(400).json({ error: 'Immunity target must be currently qualified' })
+    }
+
+    immunityTarget.immuneFromBarInRound = game.currentRound + 1
+    game.executiveDecisionTargetId = immunityTarget.id
+    immunityGrantedPlayer = immunityTarget
+  }
+
   game.status = 'announcement'
 
   const resWithSocket = res as NextApiResponseWithSocket
@@ -145,6 +168,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ed1Barred: {
         id: ed1BarredPlayer.id,
         name: ed1BarredPlayer.name
+      }
+    } : {}),
+    ...(immunityGrantedPlayer !== null ? {
+      immunityGranted: {
+        id: immunityGrantedPlayer.id,
+        name: immunityGrantedPlayer.name
       }
     } : {})
   })

@@ -3,7 +3,7 @@ import ButtonLiquid from '../ButtonLiquid'
 import VoteButton from '../VoteButton'
 import type { ExecutiveDecisionType } from '../../types/types'
 
-type Phase = 'bar' | 'executive_decision' | 'ed1_target'
+type Phase = 'bar' | 'executive_decision' | 'ed1_target' | 'immunity_target'
 
 const EXECUTIVE_DECISIONS: Array<{ id: ExecutiveDecisionType; title: string }> = [
   {
@@ -13,6 +13,10 @@ const EXECUTIVE_DECISIONS: Array<{ id: ExecutiveDecisionType; title: string }> =
   {
     id: 'self_immunity_next_cycle',
     title: 'Immunity from Being Barred in Next Cycle',
+  },
+  {
+    id: 'grant_immunity_next_cycle',
+    title: 'Provide Immunity to Fellow Candidate in Next Cycle',
   },
   {
     id: 'opt_out',
@@ -40,6 +44,8 @@ export default function LeaderDecisionPanel({
   const [executiveDecisionOptions, setExecutiveDecisionOptions] = useState<Array<{ id: ExecutiveDecisionType; title: string }>>([])
   const [ed1TargetId, setED1TargetId] = useState<string | null>(null)
   const [ed1Candidates, setED1Candidates] = useState<Array<{ id: string; name: string }>>([])
+  const [immunityTargetId, setImmunityTargetId] = useState<string | null>(null)
+  const [immunityCandidates, setImmunityCandidates] = useState<Array<{ id: string; name: string }>>([])
 
   const transitionTo = (next: Phase, setup?: () => void) => {
     setVisible(false)
@@ -54,6 +60,10 @@ export default function LeaderDecisionPanel({
   useEffect(() => {
     setED1TargetId(null)
   }, [ed1Candidates])
+
+  useEffect(() => {
+    setImmunityTargetId(null)
+  }, [immunityCandidates])
 
   const handleBarSubmit = () => {
     if (!barredId) return
@@ -83,6 +93,7 @@ export default function LeaderDecisionPanel({
 
     transitionTo('executive_decision', () => {
       setED1Candidates(picked)
+      setImmunityCandidates(pool)
       setExecutiveDecisionOptions(selectedEDOptions)
       setSelectedED(null)
     })
@@ -94,6 +105,8 @@ export default function LeaderDecisionPanel({
       onSubmitFinalDecision(barredId, 'opt_out')
     } else if (selectedED === 'self_immunity_next_cycle') {
       onSubmitFinalDecision(barredId, 'self_immunity_next_cycle')
+    } else if (selectedED === 'grant_immunity_next_cycle') {
+      transitionTo('immunity_target')
     } else {
       transitionTo('ed1_target')
     }
@@ -102,6 +115,11 @@ export default function LeaderDecisionPanel({
   const handleED1Confirm = () => {
     if (!ed1TargetId || !barredId) return
     onSubmitFinalDecision(barredId, 'bar_another', ed1TargetId)
+  }
+
+  const handleImmunityConfirm = () => {
+    if (!immunityTargetId || !barredId) return
+    onSubmitFinalDecision(barredId, 'grant_immunity_next_cycle', immunityTargetId)
   }
 
   const panelStyle: React.CSSProperties = {
@@ -201,30 +219,64 @@ export default function LeaderDecisionPanel({
   }
 
   // phase === 'ed1_target'
+  if (phase === 'ed1_target') {
+    return (
+      <div style={panelStyle}>
+        <div style={{ textAlign: 'center' }}>
+          <h2 style={{ color: 'var(--color-text-primary)', margin: '0 0 8px 0', fontWeight: 700 }}>
+            Bar Another Candidate
+          </h2>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto' }}>
+          {ed1Candidates.map(player => (
+            <VoteButton
+              key={player.id}
+              label={player.name}
+              selected={ed1TargetId === player.id}
+              onClick={() => setED1TargetId(player.id)}
+            />
+          ))}
+        </div>
+
+        <div style={fixedBottomStyle}>
+          <ButtonLiquid
+            onClick={handleED1Confirm}
+            disabled={!ed1TargetId || isSubmittingDecision}
+            style={{ width: '100%', opacity: ed1TargetId ? 1 : 0.5, cursor: ed1TargetId ? 'pointer' : 'not-allowed' }}
+          >
+            {isSubmittingDecision ? 'Submitting...' : 'Confirm'}
+          </ButtonLiquid>
+        </div>
+      </div>
+    )
+  }
+
+  // phase === 'immunity_target'
   return (
     <div style={panelStyle}>
       <div style={{ textAlign: 'center' }}>
         <h2 style={{ color: 'var(--color-text-primary)', margin: '0 0 8px 0', fontWeight: 700 }}>
-          Bar Another Candidate
+          Provide Immunity
         </h2>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto' }}>
-        {ed1Candidates.map(player => (
+        {immunityCandidates.map(player => (
           <VoteButton
             key={player.id}
             label={player.name}
-            selected={ed1TargetId === player.id}
-            onClick={() => setED1TargetId(player.id)}
+            selected={immunityTargetId === player.id}
+            onClick={() => setImmunityTargetId(player.id)}
           />
         ))}
       </div>
 
       <div style={fixedBottomStyle}>
         <ButtonLiquid
-          onClick={handleED1Confirm}
-          disabled={!ed1TargetId || isSubmittingDecision}
-          style={{ width: '100%', opacity: ed1TargetId ? 1 : 0.5, cursor: ed1TargetId ? 'pointer' : 'not-allowed' }}
+          onClick={handleImmunityConfirm}
+          disabled={!immunityTargetId || isSubmittingDecision}
+          style={{ width: '100%', opacity: immunityTargetId ? 1 : 0.5, cursor: immunityTargetId ? 'pointer' : 'not-allowed' }}
         >
           {isSubmittingDecision ? 'Submitting...' : 'Confirm'}
         </ButtonLiquid>

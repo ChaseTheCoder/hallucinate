@@ -12,6 +12,12 @@ export const immunityAnnouncementExtension: string[] = [
   "grant themselves immunity in the next cylce."
 ]
 
+export const fellowImmunityAnnouncementExtension: string[] = [
+  "Your leader also made an executive decision to...",
+  "grant immunity to",
+  "{PLAYER_GRANTED_IMMUNITY}"
+]
+
 export const gameContent = {
   join: {
     playerMessage: "Waiting for fellow candidates to join...",

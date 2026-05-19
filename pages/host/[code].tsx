@@ -8,7 +8,7 @@ import Right from '../../components/host/Right'
 import Popover from '../../components/Popover'
 import ButtonLiquid from '../../components/ButtonLiquid'
 import { Game } from '../../types/types'
-import { gameContent, ed1AnnouncementExtension, immunityAnnouncementExtension } from '../../content/content'
+import { gameContent, ed1AnnouncementExtension, immunityAnnouncementExtension, fellowImmunityAnnouncementExtension } from '../../content/content'
 import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment } from '../../content/hostNarration'
 import updateGame from '../../utils/updateGame'
 
@@ -44,6 +44,7 @@ export default function HostPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [latestBarredName, setLatestBarredName] = useState<string | null>(null)
   const [secondBarredName, setSecondBarredName] = useState<string | null>(null)
+  const [grantedImmunityPlayerName, setGrantedImmunityPlayerName] = useState<string | null>(null)
   const [displayedHostMessages, setDisplayedHostMessages] = useState<string[]>(['Loading...'])
   const [displayedMessageIndices, setDisplayedMessageIndices] = useState<number[]>([0])
   const [isLeaderRevealed, setIsLeaderRevealed] = useState(false)
@@ -315,6 +316,11 @@ export default function HostPage() {
     const nextSecondBarred = ed1BarredId ? nextPlayers.find(p => p.id === ed1BarredId) : null
     setSecondBarredName(nextSecondBarred?.name ?? null)
 
+    // Derive immunity target name for ED3 announcement
+    const immunityTargetId = game?.executiveDecision === 'grant_immunity_next_cycle' ? (game?.executiveDecisionTargetId ?? null) : null
+    const nextImmunityTarget = immunityTargetId ? nextPlayers.find(p => p.id === immunityTargetId) : null
+    setGrantedImmunityPlayerName(nextImmunityTarget?.name ?? null)
+
     let nextTimeRemaining = ''
     if (game?.status === 'campaign' && remainingSeconds > 0) {
       const minutes = Math.floor(remainingSeconds / 60)
@@ -384,6 +390,14 @@ export default function HostPage() {
           hostMessage: [
             ...(baseContent.hostMessage as string[]),
             ...immunityAnnouncementExtension
+          ]
+        } as typeof baseContent)
+      } else if (game.status === 'announcement' && game.executiveDecision === 'grant_immunity_next_cycle') {
+        setContent({
+          ...baseContent,
+          hostMessage: [
+            ...(baseContent.hostMessage as string[]),
+            ...fellowImmunityAnnouncementExtension
           ]
         } as typeof baseContent)
       } else {
@@ -596,6 +610,7 @@ export default function HostPage() {
           .replace('{LEADER_NAME}', leaderName || 'TBD')
           .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
           .replace('{ED1_PLAYER_NAME}', secondBarredName || 'TBD')
+          .replace('{PLAYER_GRANTED_IMMUNITY}', grantedImmunityPlayerName || 'TBD')
           .replace('{TIME}', timeRemaining || 'TBD')
           .replace('{VOTE_PROGRESS}', voteProgress || '0/0')
           .replace('{WINNER_NAME}', winnerName)
@@ -615,6 +630,7 @@ export default function HostPage() {
     messageIndex,
     leaderName,
     latestBarredName,
+    grantedImmunityPlayerName,
     timeRemaining,
     voteProgress,
     winnerName,

@@ -21,7 +21,7 @@ export interface GameRound {
 
 export type StatusTypes = 'join' | 'rules' | 'campaign' | 'vote' | 'results' | 'decision' | 'announcement' | 'final'
 
-export type ExecutiveDecisionType = 'bar_another' | 'self_immunity_next_cycle' | 'opt_out'
+export type ExecutiveDecisionType = 'bar_another' | 'self_immunity_next_cycle' | 'grant_immunity_next_cycle' | 'opt_out'
 
 export interface Game {
   id: string // UUID
