@@ -4,6 +4,7 @@ export interface Player {
   votes: number
   leader: boolean
   isQualified: boolean // Can't gain voting points
+  immuneFromBarInRound?: number // Round index where this player cannot be barred
   roundsBarred: number // Track how many rounds barred (for special privileges)
   isAdmin: boolean
   hasVoted: boolean // Track if player has voted in current round
@@ -20,7 +21,7 @@ export interface GameRound {
 
 export type StatusTypes = 'join' | 'rules' | 'campaign' | 'vote' | 'results' | 'decision' | 'announcement' | 'final'
 
-export type ExecutiveDecisionType = 'bar_another' | 'opt_out'
+export type ExecutiveDecisionType = 'bar_another' | 'self_immunity_next_cycle' | 'opt_out'
 
 export interface Game {
   id: string // UUID

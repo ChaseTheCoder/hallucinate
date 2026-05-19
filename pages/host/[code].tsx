@@ -8,7 +8,7 @@ import Right from '../../components/host/Right'
 import Popover from '../../components/Popover'
 import ButtonLiquid from '../../components/ButtonLiquid'
 import { Game } from '../../types/types'
-import { gameContent, ed1AnnouncementExtension } from '../../content/content'
+import { gameContent, ed1AnnouncementExtension, immunityAnnouncementExtension } from '../../content/content'
 import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment } from '../../content/hostNarration'
 import updateGame from '../../utils/updateGame'
 
@@ -376,6 +376,14 @@ export default function HostPage() {
           hostMessage: [
             ...(baseContent.hostMessage as string[]),
             ...ed1AnnouncementExtension
+          ]
+        } as typeof baseContent)
+      } else if (game.status === 'announcement' && game.executiveDecision === 'self_immunity_next_cycle') {
+        setContent({
+          ...baseContent,
+          hostMessage: [
+            ...(baseContent.hostMessage as string[]),
+            ...immunityAnnouncementExtension
           ]
         } as typeof baseContent)
       } else {

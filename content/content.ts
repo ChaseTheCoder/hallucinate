@@ -7,6 +7,11 @@ export const ed1AnnouncementExtension: string[] = [
   "{ED1_PLAYER_NAME}"
 ]
 
+export const immunityAnnouncementExtension: string[] = [
+  "Your leader also made an executive decision to...",
+  "grant themselves immunity in the next cylce."
+]
+
 export const gameContent = {
   join: {
     playerMessage: "Waiting for fellow candidates to join...",

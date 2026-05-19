@@ -50,6 +50,7 @@ export default function PlayerPage() {
   const [connectedPlayers, setConnectedPlayers] = useState(0)
   const [startBlockedReason, setStartBlockedReason] = useState<string | undefined>(undefined)
   const [showLeaveGamePopover, setShowLeaveGamePopover] = useState(false)
+  const [showSkipRulesPopover, setShowSkipRulesPopover] = useState(false)
 
   const applyProjection = (projection: PlayerProjection) => {
     setGameStatus(projection.status)
@@ -298,6 +299,22 @@ export default function PlayerPage() {
     }
   }
 
+  const handleSkipRulesClick = () => {
+    setShowSkipRulesPopover(true)
+  }
+
+  const confirmSkipRules = async () => {
+    if (!gameCode) return
+
+    try {
+      await updateGame(gameCode)
+      setShowSkipRulesPopover(false)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to skip rules'
+      alert(message)
+    }
+  }
+
   if (loading) {
     return <div style={{ padding: 24 }}>Loading...</div>
   }
@@ -398,6 +415,14 @@ export default function PlayerPage() {
                 startBlockedReason={startBlockedReason}
               />
             )}
+
+            {isAdmin && gameStatus === 'rules' && (
+              <div style={{ marginTop: 16 }}>
+                <ButtonLiquid onClick={handleSkipRulesClick}>
+                  Skip Rules
+                </ButtonLiquid>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -408,6 +433,14 @@ export default function PlayerPage() {
         title="Are you sure you want to leave this game?"
         confirmText="Confirm Leave Game"
         onConfirm={confirmLeaveGame}
+      />
+
+      <Popover
+        isOpen={showSkipRulesPopover}
+        onClose={() => setShowSkipRulesPopover(false)}
+        title="Confirm Skip Rules"
+        confirmText="Skip Rules"
+        onConfirm={confirmSkipRules}
       />
     </div>
   )

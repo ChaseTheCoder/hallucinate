@@ -36,7 +36,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Missing leaderId, barredId, or executiveDecision' })
   }
 
-  if (!['bar_another', 'opt_out'].includes(executiveDecision)) {
+  if (!['bar_another', 'self_immunity_next_cycle', 'opt_out'].includes(executiveDecision)) {
     return res.status(400).json({ error: 'Invalid executiveDecision value' })
   }
 
@@ -61,6 +61,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (!barredPlayer.isQualified) {
     return res.status(400).json({ error: 'Player is already barred' })
+  }
+
+  if (barredPlayer.immuneFromBarInRound === game.currentRound) {
+    return res.status(400).json({ error: 'Player is immune from being barred this round' })
   }
 
   if (barredPlayer.id === leader.id) {
@@ -93,6 +97,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!edTarget.isQualified) {
       return res.status(400).json({ error: 'Executive decision target is already barred' })
     }
+    if (edTarget.immuneFromBarInRound === game.currentRound) {
+      return res.status(400).json({ error: 'Executive decision target is immune this round' })
+    }
     if (edTarget.id === leader.id) {
       return res.status(400).json({ error: 'Leader cannot bar themselves via executive decision' })
     }
@@ -110,6 +117,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     game.executiveDecisionTargetId = edTarget.id
     ed1BarredPlayer = edTarget
+  }
+
+  // Handle ED2: grant the current leader immunity for next cycle's decision round.
+  if (executiveDecision === 'self_immunity_next_cycle') {
+    leader.immuneFromBarInRound = game.currentRound + 1
   }
 
   game.status = 'announcement'

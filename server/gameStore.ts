@@ -246,6 +246,7 @@ export function buildPlayerProjection(game: Game, player: Player): PlayerProject
     projection.decision = {
       candidates: qualifiedPlayers
         .filter(p => !p.leader)
+        .filter(p => p.immuneFromBarInRound !== game.currentRound)
         .map(p => ({ id: p.id, name: p.name })),
     }
   }

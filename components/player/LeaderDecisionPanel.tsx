@@ -11,6 +11,10 @@ const EXECUTIVE_DECISIONS: Array<{ id: ExecutiveDecisionType; title: string }> =
     title: 'Bar Another Candidate of Two I Selected for You',
   },
   {
+    id: 'self_immunity_next_cycle',
+    title: 'Immunity from Being Barred in Next Cycle',
+  },
+  {
     id: 'opt_out',
     title: 'Opt Out of Executive Decision',
   },
@@ -33,6 +37,7 @@ export default function LeaderDecisionPanel({
   const [visible, setVisible] = useState(true)
   const [barredId, setBarredId] = useState<string | null>(null)
   const [selectedED, setSelectedED] = useState<ExecutiveDecisionType | null>(null)
+  const [executiveDecisionOptions, setExecutiveDecisionOptions] = useState<Array<{ id: ExecutiveDecisionType; title: string }>>([])
   const [ed1TargetId, setED1TargetId] = useState<string | null>(null)
   const [ed1Candidates, setED1Candidates] = useState<Array<{ id: string; name: string }>>([])
 
@@ -65,8 +70,20 @@ export default function LeaderDecisionPanel({
     const pool = decisionCandidates.filter(p => p.id !== barredId)
     const shuffled = [...pool].sort(() => Math.random() - 0.5)
     const picked = shuffled.slice(0, 2)
+
+    const eligibleEDs = EXECUTIVE_DECISIONS.filter(ed => {
+      if (ed.id === 'bar_another') {
+        return picked.length === 2
+      }
+      return true
+    })
+
+    const shuffledEDs = [...eligibleEDs].sort(() => Math.random() - 0.5)
+    const selectedEDOptions = shuffledEDs.slice(0, Math.min(2, shuffledEDs.length))
+
     transitionTo('executive_decision', () => {
       setED1Candidates(picked)
+      setExecutiveDecisionOptions(selectedEDOptions)
       setSelectedED(null)
     })
   }
@@ -75,6 +92,8 @@ export default function LeaderDecisionPanel({
     if (!selectedED || !barredId) return
     if (selectedED === 'opt_out') {
       onSubmitFinalDecision(barredId, 'opt_out')
+    } else if (selectedED === 'self_immunity_next_cycle') {
+      onSubmitFinalDecision(barredId, 'self_immunity_next_cycle')
     } else {
       transitionTo('ed1_target')
     }
@@ -153,7 +172,7 @@ export default function LeaderDecisionPanel({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto' }}>
-          {EXECUTIVE_DECISIONS.map(ed => (
+          {executiveDecisionOptions.map(ed => (
             <ButtonLiquid
               key={ed.id}
               onClick={() => setSelectedED(ed.id)}
