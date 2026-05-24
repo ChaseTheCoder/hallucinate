@@ -1,5 +1,5 @@
 import type { Game } from '../../types/types'
-import { gameContent, ed1AnnouncementExtension, immunityAnnouncementExtension, fellowImmunityAnnouncementExtension } from '../../content/content'
+import { gameContent, barAnotherAnnouncementExtension, selfImmunityAnnouncementExtension, grantImmunityAnnouncementExtension } from '../../content/content'
 import { getHostNarrationSegment } from '../../content/hostNarration'
 
 const SUPPORTED_STATUS_MUSIC = new Set<Game['status']>(['join', 'rules', 'campaign', 'vote', 'results', 'decision', 'announcement', 'final'])
@@ -27,7 +27,7 @@ export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], 
 			...baseContent,
 			hostMessage: [
 				...(baseContent.hostMessage as string[]),
-				...ed1AnnouncementExtension
+				...barAnotherAnnouncementExtension
 			]
 		}
 	}
@@ -37,7 +37,7 @@ export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], 
 			...baseContent,
 			hostMessage: [
 				...(baseContent.hostMessage as string[]),
-				...immunityAnnouncementExtension
+				...selfImmunityAnnouncementExtension
 			]
 		}
 	}
@@ -47,7 +47,7 @@ export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], 
 			...baseContent,
 			hostMessage: [
 				...(baseContent.hostMessage as string[]),
-				...fellowImmunityAnnouncementExtension
+				...grantImmunityAnnouncementExtension
 			]
 		}
 	}
@@ -81,12 +81,12 @@ export function formatHostMessage(
 		.replace('{LOSER_POINTS}', String(tokens.loserPoints ?? 0))
 }
 
-export function shouldHostMessageBeBold(status: Game['status'] | undefined, message: string, originalIndex: number): boolean {
+export function shouldHostMessageBeBold(status: Game['status'] | undefined, message: string, originalIndex: number, executiveDecision?: Game['executiveDecision']): boolean {
 	if (status === 'join' && originalIndex === 0) return true
 	if (message.startsWith('Phase')) return true
 
 	if (status) {
-		const segment = getHostNarrationSegment(status, originalIndex)
+		const segment = getHostNarrationSegment(status, originalIndex, executiveDecision)
 		if (segment?.hasDynamicTokens) return true
 	}
 

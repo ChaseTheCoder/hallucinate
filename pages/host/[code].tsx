@@ -370,7 +370,7 @@ export default function HostPage() {
   useEffect(() => {
     if (!game?.status || !Array.isArray(content?.hostMessage) || messageIndex >= content.hostMessage.length) return
 
-    const segment = getHostNarrationSegment(game.status, messageIndex)
+    const segment = getHostNarrationSegment(game.status, messageIndex, game.executiveDecision)
     // For ED1 extended announcement messages (beyond original content.ts length),
     // segment will be null — apply dramatic pause for the second-to-last and last messages.
     let delayMs = segment?.pauseAfterMs ?? DEFAULT_HOST_PAUSE_MS
@@ -738,7 +738,7 @@ export default function HostPage() {
           }}>
             {displayedHostMessages.map((message, index) => {
               const originalIndex = displayedMessageIndices[index] ?? index
-              const isBold = shouldHostMessageBeBold(game?.status, message, originalIndex)
+              const isBold = shouldHostMessageBeBold(game?.status, message, originalIndex, game?.executiveDecision)
               return (
                 <Text key={index} size={isBold ? 1.75 : 1.5} color='text-primary' bold={isBold} style={{ marginBottom: index < displayedHostMessages.length - 1 ? '0.5rem' : 0 }}>
                   {formatHostMessage(message, {

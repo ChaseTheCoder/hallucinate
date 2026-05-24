@@ -1,20 +1,21 @@
-// Extra announcement messages appended when the leader chose Executive Decision 1 (bar another).
+// Extra announcement messages appended when the leader chose bar another.
 // These are appended to the standard announcement.hostMessage array on the host page.
-export const ed1AnnouncementExtension: string[] = [
+export const barAnotherAnnouncementExtension: string[] = [
   "Your leader also made an executive decision to...",
   "bar another candidate...",
   "and that candidate is....",
   "{ED1_PLAYER_NAME}"
 ]
 
-export const immunityAnnouncementExtension: string[] = [
+export const selfImmunityAnnouncementExtension: string[] = [
   "Your leader also made an executive decision to...",
-  "grant themselves immunity in the next cylce."
+  "grant themselves immunity in the next cycle."
 ]
 
-export const fellowImmunityAnnouncementExtension: string[] = [
+export const grantImmunityAnnouncementExtension: string[] = [
   "Your leader also made an executive decision to...",
-  "grant immunity to",
+  "grant immunity to a fellow candidate in the next cycle.",
+  "and that candidate is....",
   "{PLAYER_GRANTED_IMMUNITY}"
 ]
 
