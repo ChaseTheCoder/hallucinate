@@ -8,9 +8,11 @@ import Right from '../../components/host/Right'
 import Popover from '../../components/Popover'
 import ButtonLiquid from '../../components/ButtonLiquid'
 import { Game } from '../../types/types'
-import { gameContent, ed1AnnouncementExtension, immunityAnnouncementExtension, fellowImmunityAnnouncementExtension } from '../../content/content'
+import { gameContent } from '../../content/content'
 import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment } from '../../content/hostNarration'
 import updateGame from '../../utils/updateGame'
+import useStatusMusic from '../../utils/host/useStatusMusic'
+import { formatHostMessage, getExtendedAnnouncementHostMessages, shouldHostMessageBeBold } from '../../utils/host/utils'
 
 let socket: Socket | null = null
 const AUTO_TRANSITION_STATUSES: Game['status'][] = ['rules', 'results', 'announcement']
@@ -53,13 +55,13 @@ export default function HostPage() {
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [audioRetryTick, setAudioRetryTick] = useState(0)
   const [audioAmplitude, setAudioAmplitude] = useState<number>(0)
+  const [isNarrationPlaying, setIsNarrationPlaying] = useState(false)
   const [showEndGamePopover, setShowEndGamePopover] = useState(false)
   const narrationAudioRef = useRef<HTMLAudioElement | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animationFrameRef = useRef<number | null>(null)
   const autoTransitionedStatusRef = useRef<Game['status'] | null>(null)
-  const narrationAvailabilityCacheRef = useRef<Record<string, boolean>>({})
 
   const handleTransition = useCallback(async () => {
     if (!gameCode) return
@@ -70,22 +72,7 @@ export default function HostPage() {
     }
   }, [gameCode])
 
-  const hasNarrationAudio = useCallback(async (audioUrl: string) => {
-    const cached = narrationAvailabilityCacheRef.current[audioUrl]
-    if (cached !== undefined) {
-      return cached
-    }
-
-    try {
-      const response = await fetch(audioUrl, { method: 'HEAD' })
-      const exists = response.ok
-      narrationAvailabilityCacheRef.current[audioUrl] = exists
-      return exists
-    } catch {
-      narrationAvailabilityCacheRef.current[audioUrl] = false
-      return false
-    }
-  }, [])
+  useStatusMusic(game?.status, isNarrationPlaying)
 
   // socket connection and game state management
   useEffect(() => {
@@ -185,7 +172,6 @@ export default function HostPage() {
     }
   }, [gameCode, gameExists, hasInitialGameData, router])
 
-  // Fetch initial game state once; socket keeps it live afterward.
   useEffect(() => {
     if (!gameCode || game || didLoadAttempted) return
 
@@ -375,34 +361,7 @@ export default function HostPage() {
   useEffect(() => {
     if (game?.status) {
       const gameStatus = game.status as keyof typeof gameContent
-      const baseContent = gameContent[gameStatus]
-      if (game.status === 'announcement' && game.executiveDecision === 'bar_another') {
-        setContent({
-          ...baseContent,
-          hostMessage: [
-            ...(baseContent.hostMessage as string[]),
-            ...ed1AnnouncementExtension
-          ]
-        } as typeof baseContent)
-      } else if (game.status === 'announcement' && game.executiveDecision === 'self_immunity_next_cycle') {
-        setContent({
-          ...baseContent,
-          hostMessage: [
-            ...(baseContent.hostMessage as string[]),
-            ...immunityAnnouncementExtension
-          ]
-        } as typeof baseContent)
-      } else if (game.status === 'announcement' && game.executiveDecision === 'grant_immunity_next_cycle') {
-        setContent({
-          ...baseContent,
-          hostMessage: [
-            ...(baseContent.hostMessage as string[]),
-            ...fellowImmunityAnnouncementExtension
-          ]
-        } as typeof baseContent)
-      } else {
-        setContent(baseContent)
-      }
+      setContent(getExtendedAnnouncementHostMessages(gameStatus, game.executiveDecision))
       setMessageIndex(0)
     }
   }, [game?.status, game?.executiveDecision])
@@ -453,6 +412,7 @@ export default function HostPage() {
     }
 
     if (!segment?.audioUrl || segment.hasDynamicTokens) {
+      setIsNarrationPlaying(false)
       setAutoplayBlocked(false)
       resolveSegment()
 
@@ -507,6 +467,7 @@ export default function HostPage() {
 
     const handleEnded = () => {
       if (isCancelled) return
+      setIsNarrationPlaying(false)
       setAudioAmplitude(0)
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
@@ -516,6 +477,7 @@ export default function HostPage() {
 
     const handleError = () => {
       if (isCancelled) return
+      setIsNarrationPlaying(false)
       setAudioAmplitude(0)
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
@@ -530,6 +492,7 @@ export default function HostPage() {
     audio.play().catch((error: unknown) => {
       const err = error as { name?: string }
       if (err?.name === 'NotAllowedError') {
+        setIsNarrationPlaying(false)
         setAutoplayBlocked(true)
         console.log('Browser blocked autoplay. Audio will auto-retry on the next user interaction.')
         resolveSegment()
@@ -537,6 +500,7 @@ export default function HostPage() {
       }
       handleError()
     })
+    setIsNarrationPlaying(true)
 
     return () => {
       isCancelled = true
@@ -547,6 +511,7 @@ export default function HostPage() {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
       }
+      setIsNarrationPlaying(false)
       setAudioAmplitude(0)
       if (narrationAudioRef.current === audio) {
         narrationAudioRef.current = null
@@ -693,19 +658,6 @@ export default function HostPage() {
     }
   }
 
-  const shouldMessageBeBold = (status: Game['status'] | undefined, message: string, originalIndex: number): boolean => {
-    if (status === 'join' && originalIndex === 0) return true
-    if (message.startsWith('Phase')) return true
-    
-    // Check if the original message has dynamic tokens
-    if (status) {
-      const segment = getHostNarrationSegment(status, originalIndex)
-      if (segment?.hasDynamicTokens) return true
-    }
-    
-    return false
-  }
-
   if (!gameCode) return <div style={{ padding: 24 }}>Loading...</div>
 
   if (!gameExists) {
@@ -739,6 +691,7 @@ export default function HostPage() {
         gameStatus={game?.status}
         code={gameCode}
         connected={connected}
+        qualifiedPlayersCount={game?.players?.filter(player => player.isQualified).length}
         onEndGame={handleEndGame}
       />
       <div
@@ -785,10 +738,20 @@ export default function HostPage() {
           }}>
             {displayedHostMessages.map((message, index) => {
               const originalIndex = displayedMessageIndices[index] ?? index
-              const isBold = shouldMessageBeBold(game?.status, message, originalIndex)
+              const isBold = shouldHostMessageBeBold(game?.status, message, originalIndex)
               return (
                 <Text key={index} size={isBold ? 1.75 : 1.5} color='text-primary' bold={isBold} style={{ marginBottom: index < displayedHostMessages.length - 1 ? '0.5rem' : 0 }}>
-                  {message}
+                  {formatHostMessage(message, {
+                    leaderName,
+                    latestBarredName,
+                    secondBarredName,
+                    grantedImmunityPlayerName,
+                    timeRemaining,
+                    voteProgress,
+                    winnerName,
+                    winnerPoints,
+                    loserPoints
+                  })}
                 </Text>
               )
             })}

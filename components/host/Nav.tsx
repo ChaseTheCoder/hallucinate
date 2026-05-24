@@ -8,11 +8,14 @@ type NavProps = {
 	gameStatus?: Game['status']
 	code?: string
 	connected: boolean
+	qualifiedPlayersCount?: number
 	onEndGame: () => void | Promise<void>
 }
 
-export default function Nav({ gameStatus, code, connected, onEndGame }: NavProps) {
-	const gameStatusDisplay: Game['status'][] = ['campaign', 'vote', 'results', 'decision', 'announcement']
+export default function Nav({ gameStatus, code, connected, qualifiedPlayersCount, onEndGame }: NavProps) {
+	const gameStatusDisplay: Game['status'][] = qualifiedPlayersCount === 2
+		? ['campaign', 'vote', 'final']
+		: ['campaign', 'vote', 'results', 'decision', 'announcement']
 	const [displayedStatus, setDisplayedStatus] = useState<Game['status'] | undefined>(gameStatus)
 	const [statusPhase, setStatusPhase] = useState<'in' | 'out'>('in')
 	const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
