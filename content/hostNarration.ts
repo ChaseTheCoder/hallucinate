@@ -19,15 +19,6 @@ export interface HostNarrationSegment {
   hasDynamicTokens: boolean
 }
 
-const DRAMATIC_PAUSE_OVERRIDES_MS: Record<string, number> = {
-  // 'rules.hostMessage.0': 7000,
-  // 'rules.hostMessage.5': 5000,
-  // 'rules.hostMessage.9': 5000,
-  // 'results.hostMessage.1': 5000,
-  // 'announcement.hostMessage.1': 5000,
-  // 'final.hostMessage.2': 6000,
-}
-
 const AUDIO_OBJECT_VERSION_PREFIX = process.env.NEXT_PUBLIC_AUDIO_OBJECT_VERSION_PREFIX?.trim() || 'v1'
 const AUDIO_OBJECT_SUFFIX = process.env.NEXT_PUBLIC_AUDIO_OBJECT_SUFFIX?.trim() || ''
 
@@ -165,21 +156,19 @@ function asHostMessages(value: unknown): string[] {
   return value.filter((part): part is string => typeof part === 'string')
 }
 
-function computePauseMs(status: StatusTypes, index: number, total: number, id: string): number {
-  if (DRAMATIC_PAUSE_OVERRIDES_MS[id] !== undefined) {
-    return DRAMATIC_PAUSE_OVERRIDES_MS[id]
-  }
+function isDynamicTokenLine(text: string): boolean {
+  const trimmed = text.trim()
+  return /^\{[^{}]+\}$/.test(trimmed)
+}
 
-  const isLast = index === total - 1
-  const isSecondToLast = index === total - 2
+function computePauseMs(status: StatusTypes, index: number, hostMessages: string[], id: string): number {
+  const currentText = hostMessages[index] ?? ''
+  const nextText = hostMessages[index + 1] ?? ''
+  const isCurrentDynamicToken = isDynamicTokenLine(currentText)
+  const isNextDynamicToken = isDynamicTokenLine(nextText)
 
-  // Final winner reveal — stay on screen indefinitely until host ends game
-  if (status === 'final' && isLast) {
-    return Infinity
-  }
-
-  // Dramatic pause before leader/winner name is revealed
-  if ((status === 'results' || status === 'announcement' || status === 'final') && (isSecondToLast || isLast)) {
+  // Add dramatic pause after dynamic token lines and before the next dynamic token line.
+  if (isCurrentDynamicToken || isNextDynamicToken) {
     return 8000
   }
 
@@ -199,7 +188,7 @@ export function getHostNarrationSegments(status: StatusTypes, executiveDecision?
       text,
       audioObjectKey,
       audioUrl: buildAudioUrl(audioObjectKey),
-      pauseAfterMs: computePauseMs(status, index, hostMessages.length, id),
+      pauseAfterMs: computePauseMs(status, index, hostMessages, id),
       hasDynamicTokens: text.includes('{') && text.includes('}')
     }
   })

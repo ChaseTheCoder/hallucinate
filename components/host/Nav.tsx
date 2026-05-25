@@ -13,7 +13,7 @@ type NavProps = {
 }
 
 export default function Nav({ gameStatus, code, connected, qualifiedPlayersCount, onEndGame }: NavProps) {
-	const gameStatusDisplay: Game['status'][] = qualifiedPlayersCount === 2
+	const gameStatusDisplay: Game['status'][] = qualifiedPlayersCount === 2 && gameStatus !== 'announcement'
 		? ['campaign', 'vote', 'final']
 		: ['campaign', 'vote', 'results', 'decision', 'announcement']
 	const [displayedStatus, setDisplayedStatus] = useState<Game['status'] | undefined>(gameStatus)
