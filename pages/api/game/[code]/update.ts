@@ -48,7 +48,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         newStatus = 'rules'
         // Set cycle time if provided (in seconds)
         if (cycleTime && typeof cycleTime === 'number') {
-          game.cycleTime = Math.min(60, Math.max(5, cycleTime)) // clamp seconds to 5-60
+          game.cycleTime = Math.min(300, Math.max(5, cycleTime)) // clamp seconds to 5-300
         }
         // Qualify all players at start for testing
         game.players.forEach(p => p.isQualified = true)
@@ -98,8 +98,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Set start time for campaign
     if (newStatus === 'campaign') {
       game.electionCycleStartTime = Date.now()
-      // Use 5 seconds for final round (when only 2 qualified players remain)
-      const campaignTime = qualifiedPlayerCount === 2 ? 5 : game.cycleTime
+      // Use 5 minutes for final round (when only 2 qualified players remain)
+      const campaignTime = qualifiedPlayerCount === 2 ? 300 : game.cycleTime
       console.log(`Campaign timer started for round ${game.currentRound}, time: ${campaignTime}s${qualifiedPlayerCount === 2 ? ' (final round)' : ''}`)
       
       // Broadcast the campaign time for this specific round

@@ -1,16 +1,16 @@
-import { useEffect, useRef } from 'react'
-import type { Game } from '../../types/types'
+import { useEffect, useRef, useMemo } from 'react'
+import type { Game, StatusTypes } from '../../types/types'
 import { getStatusMusicUrl } from './utils'
 
-const QUIET_VOLUME = 0.08
-const DEFAULT_VOLUME = 0.2
+const QUIET_VOLUME = 0.05
+const DEFAULT_VOLUME = 0.10
 const FADE_UP_MS = 2000
 
 /**
  * Determine which status's music should be playing.
  * Special case: results music persists and loops through decision status.
  */
-function getActiveStatusForMusic(status?: Game['status'] | null): Game['status'] | null {
+function getActiveStatusForMusic(status?: StatusTypes | null): StatusTypes | null {
   if (!status) return null
   
   // Results music plays during results AND decision statuses
@@ -21,10 +21,14 @@ function getActiveStatusForMusic(status?: Game['status'] | null): Game['status']
   return status
 }
 
-export default function useStatusMusic(gameStatus?: Game['status'] | null, isNarrationPlaying: boolean = false) {
+export default function useStatusMusic(gameStatus?: StatusTypes | null, isNarrationPlaying: boolean = false) {
   const musicAudioRef = useRef<HTMLAudioElement | null>(null)
   const fadeRafRef = useRef<number | null>(null)
-  const activeMusicStatusRef = useRef<Game['status'] | null>(null)
+  const activeMusicStatusRef = useRef<StatusTypes | null>(null)
+
+  // Memoize derived values to prevent recalculation on every isNarrationPlaying change
+  const activeMusicStatus = useMemo(() => getActiveStatusForMusic(gameStatus), [gameStatus])
+  const musicUrl = useMemo(() => getStatusMusicUrl(activeMusicStatus), [activeMusicStatus])
 
   const stopFade = () => {
     if (fadeRafRef.current != null) {
@@ -59,7 +63,6 @@ export default function useStatusMusic(gameStatus?: Game['status'] | null, isNar
   }
 
   useEffect(() => {
-    const activeMusicStatus = getActiveStatusForMusic(gameStatus)
     const prevMusicStatus = activeMusicStatusRef.current
 
     // If music status hasn't changed, keep existing audio
@@ -76,7 +79,6 @@ export default function useStatusMusic(gameStatus?: Game['status'] | null, isNar
       musicAudioRef.current = null
     }
 
-    const musicUrl = getStatusMusicUrl(activeMusicStatus)
     if (!musicUrl) {
       return
     }
@@ -102,12 +104,11 @@ export default function useStatusMusic(gameStatus?: Game['status'] | null, isNar
         musicAudioRef.current = null
       }
     }
-  }, [gameStatus])
+  }, [activeMusicStatus, musicUrl])
 
   useEffect(() => {
     const music = musicAudioRef.current
-    const activeMusicStatus = getActiveStatusForMusic(gameStatus)
-    if (!music || !getStatusMusicUrl(activeMusicStatus)) return
+    if (!music || !musicUrl) return
 
     if (isNarrationPlaying) {
       stopFade()
@@ -116,7 +117,7 @@ export default function useStatusMusic(gameStatus?: Game['status'] | null, isNar
     }
 
     fadeToVolume(music, DEFAULT_VOLUME, FADE_UP_MS)
-  }, [gameStatus, isNarrationPlaying])
+  }, [musicUrl, isNarrationPlaying])
 
   useEffect(() => {
     return () => {

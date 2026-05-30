@@ -36,7 +36,7 @@ export default function PlayerPage() {
   const [isSubmittingVote, setIsSubmittingVote] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false)
-  const [cycleTimeInput, setCycleTimeInput] = useState<string>('10')
+  const [cycleTimeInput, setCycleTimeInput] = useState<string>('300')
   const [cycleTimeSet, setCycleTimeSet] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('disconnected')
   const [sessionData, setSessionData] = useState<SessionData | null>(null)

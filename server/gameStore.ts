@@ -83,7 +83,7 @@ export async function createGame(): Promise<Game> {
     code,
     started: false,
     status: 'join',
-    cycleTime: 60,
+    cycleTime: 300,
     players: [],
     rounds: [],
     currentRound: 0,
@@ -151,7 +151,7 @@ function normalizeLoadedGame(raw: unknown): Game | null {
     players: Array.isArray(g.players) ? g.players : [],
     rounds: Array.isArray(g.rounds) ? g.rounds : [],
     status: g.status ?? 'join',
-    cycleTime: typeof g.cycleTime === 'number' ? g.cycleTime : 60,
+    cycleTime: typeof g.cycleTime === 'number' ? g.cycleTime : 300,
     currentRound: typeof g.currentRound === 'number' ? g.currentRound : 0,
     electionCycleStartTime: typeof g.electionCycleStartTime === 'number' ? g.electionCycleStartTime : 0,
     createdAt: typeof g.createdAt === 'number' ? g.createdAt : Date.now()

@@ -31,7 +31,7 @@ export default function CampaignTimePanel({
       <input
         type="number"
         min="5"
-        max="60"
+        max="300"
         value={cycleTimeInput}
         onChange={(e) => onCycleTimeChange(e.target.value)}
         style={{
