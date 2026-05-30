@@ -19,7 +19,6 @@ interface NextApiResponseWithSocket extends NextApiResponse {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'PATCH') {
     const { code } = req.query
-    const { cycleTime } = req.body
 
     const game = await findGameByCode(code as string)
     if (!game) {
@@ -46,10 +45,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // State transitions
       if (currentStatus === 'join' && game.players.length >= 4) {
         newStatus = 'rules'
-        // Set cycle time if provided (in seconds)
-        if (cycleTime && typeof cycleTime === 'number') {
-          game.cycleTime = Math.min(300, Math.max(5, cycleTime)) // clamp seconds to 5-300
-        }
         // Qualify all players at start for testing
         game.players.forEach(p => p.isQualified = true)
       } else if (currentStatus === 'rules') {

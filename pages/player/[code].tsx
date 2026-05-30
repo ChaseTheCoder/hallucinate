@@ -5,7 +5,6 @@ import ButtonLiquid from '../../components/ButtonLiquid'
 import VotePanel from '../../components/player/VotePanel'
 import PlayerHeader from '../../components/player/PlayerHeader'
 import LeaderDecisionPanel from '../../components/player/LeaderDecisionPanel'
-import CampaignTimePanel from '../../components/player/CampaignTimePanel'
 import Popover from '../../components/Popover'
 import { gameContent } from '../../content/content'
 import { ExecutiveDecisionType, PlayerProjection, StatusTypes } from '../../types/types'
@@ -36,8 +35,6 @@ export default function PlayerPage() {
   const [isSubmittingVote, setIsSubmittingVote] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false)
-  const [cycleTimeInput, setCycleTimeInput] = useState<string>('300')
-  const [cycleTimeSet, setCycleTimeSet] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('disconnected')
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -278,21 +275,7 @@ export default function PlayerPage() {
     if (!gameCode || !canStartGame) return
 
     try {
-      const body: { cycleTime?: number } = {}
-      if (gameStatus === 'join') {
-        const seconds = parseInt(cycleTimeInput, 10)
-        if (isNaN(seconds) || seconds < 5 || seconds > 60) {
-          alert('Please enter a valid number of seconds (5-60)')
-          return
-        }
-        body.cycleTime = seconds
-      }
-
-      await updateGame(gameCode, body)
-
-      if (gameStatus === 'join') {
-        setCycleTimeSet(true)
-      }
+      await updateGame(gameCode)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to start game'
       alert(message)
@@ -405,15 +388,19 @@ export default function PlayerPage() {
             <p style={{ color: '#5A5A5A', textAlign: 'center', margin: 0 }}>
               {playerMessage || 'Waiting...'}
             </p>
-            {isAdmin && gameStatus === 'join' && !cycleTimeSet && (
-              <CampaignTimePanel
-                cycleTimeInput={cycleTimeInput}
-                onCycleTimeChange={setCycleTimeInput}
-                onStartGame={handleStartGameClick}
-                playerCount={connectedPlayers}
-                canStartGame={canStartGame}
-                startBlockedReason={startBlockedReason}
-              />
+            {isAdmin && gameStatus === 'join' && (
+              <ButtonLiquid
+                onClick={handleStartGameClick}
+                disabled={!canStartGame}
+                style={{ marginTop: 12 }}
+              >
+                Start Game
+              </ButtonLiquid>
+            )}
+            {isAdmin && gameStatus === 'join' && !canStartGame && startBlockedReason && (
+              <p style={{ color: '#888', fontSize: '0.9em', marginTop: 8, textAlign: 'center' }}>
+                {startBlockedReason}
+              </p>
             )}
 
             {isAdmin && gameStatus === 'rules' && (
