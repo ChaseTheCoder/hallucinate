@@ -7,7 +7,8 @@ import PlayerHeader from '../../components/player/PlayerHeader'
 import LeaderDecisionPanel from '../../components/player/LeaderDecisionPanel'
 import Popover from '../../components/Popover'
 import { gameContent } from '../../content/content'
-import { ExecutiveDecisionType, PlayerProjection, StatusTypes } from '../../types/types'
+import { ExecutiveDecisionType, PhaseTypes, PlayerProjection, StatusTypes } from '../../types/types'
+import { PHASE_DISPLAY_NAMES } from '../../config/phases'
 import { submitVote } from '../../utils/player/submitVote'
 import { leaveGame } from '../../utils/player/leaveGame'
 import submitDecision from '../../utils/player/submitDecision'
@@ -29,6 +30,7 @@ export default function PlayerPage() {
 
   const [loading, setLoading] = useState(true)
   const [gameStatus, setGameStatus] = useState<StatusTypes | null>(null)
+  const [gamePhase, setGamePhase] = useState<PhaseTypes | null>(null)
   const [playerMessage, setPlayerMessage] = useState<string | null>(null)
   const [gameExists, setGameExists] = useState(true)
   const [hasVoted, setHasVoted] = useState(false)
@@ -51,6 +53,7 @@ export default function PlayerPage() {
 
   const applyProjection = (projection: PlayerProjection) => {
     setGameStatus(projection.status)
+    setGamePhase(projection.phase ?? null)
     setHasVoted(projection.vote?.hasSubmitted ?? false)
 
     setCanVote(projection.actions.canVote)
@@ -330,23 +333,25 @@ export default function PlayerPage() {
         gap: 12
       }}
     >
-      <div
-        style={{
-          position: 'fixed',
-          top: 12,
-          right: 12,
-          fontSize: '0.75em',
-          padding: '6px 10px',
-          borderRadius: 4,
-          fontWeight: 500,
-          backgroundColor: connectionStatus === 'connected' ? '#e8f5e9' : connectionStatus === 'reconnecting' ? '#fff8e1' : '#ffebee',
-          color: connectionStatus === 'connected' ? '#2e7d32' : connectionStatus === 'reconnecting' ? '#f57f17' : '#c62828',
-          zIndex: 1000
-        }}
-      >
-        <span style={{ display: 'inline-block', width: 6, height: 6, backgroundColor: 'currentColor', borderRadius: '50%', marginRight: 6 }}></span>
-        {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'reconnecting' ? 'Reconnecting...' : 'Disconnected'}
-      </div>
+      {connectionStatus !== 'connected' && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 12,
+            right: 12,
+            fontSize: '0.75em',
+            padding: '6px 10px',
+            borderRadius: 4,
+            fontWeight: 500,
+            backgroundColor: connectionStatus === 'reconnecting' ? '#fff8e1' : '#ffebee',
+            color: connectionStatus === 'reconnecting' ? '#f57f17' : '#c62828',
+            zIndex: 1000
+          }}
+        >
+          <span style={{ display: 'inline-block', width: 6, height: 6, backgroundColor: 'currentColor', borderRadius: '50%', marginRight: 6 }}></span>
+          {connectionStatus === 'reconnecting' ? 'Reconnecting...' : 'Disconnected'}
+        </div>
+      )}
 
       <PlayerHeader
         playerName={sessionData?.playerName || playerName}
@@ -385,6 +390,11 @@ export default function PlayerPage() {
               flex: 1
             }}
           >
+            {gamePhase && (
+              <p style={{ color: '#9A9A9A', textAlign: 'center', margin: '0 0 4px', fontSize: '0.75em', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                {PHASE_DISPLAY_NAMES[gamePhase]}
+              </p>
+            )}
             <p style={{ color: '#5A5A5A', textAlign: 'center', margin: 0 }}>
               {playerMessage || 'Waiting...'}
             </p>

@@ -42,20 +42,7 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
         socket.join(`host-game-${code}`)
         socket.join(`game-${code}`)
         
-        // Send enriched game state with computed fields  
-        socket.emit('game-state-update', enrichGame(game))
-      })
-
-      // Backward compatibility for existing host subscriptions.
-      socket.on('subscribe-to-game', async (code: string) => {
-        const game = await findGameByCode(code)
-        if (!game) {
-          socket.emit('error', 'Game not found')
-          return
-        }
-
-        socket.join(`host-game-${code}`)
-        socket.join(`game-${code}`)
+        // Send enriched game state with computed fields
         socket.emit('game-state-update', enrichGame(game))
       })
 
