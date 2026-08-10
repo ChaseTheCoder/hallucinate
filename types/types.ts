@@ -21,6 +21,9 @@ export interface GameRound {
 
 export type StatusTypes = 'join' | 'rules' | 'campaign' | 'vote' | 'results' | 'decision' | 'announcement' | 'final'
 
+// Player-facing phase (Rule of Three): campaign / election / executive / final
+export type PhaseTypes = 'campaign' | 'election' | 'executive' | 'final'
+
 export type ExecutiveDecisionType = 'bar_another' | 'self_immunity_next_cycle' | 'grant_immunity_next_cycle' | 'opt_out'
 
 export interface Game {
@@ -41,6 +44,7 @@ export interface Game {
   // Computed fields for efficient lookups
   adminPlayerId?: string // ID of the player with isAdmin = true
   currentBarredPlayerIds?: string[] // IDs of players barred in current round
+  phase?: PhaseTypes // Player-facing phase derived from status (computed, not stored)
 }
 
 export interface GameStore {
@@ -50,6 +54,7 @@ export interface GameStore {
 export interface PlayerProjection {
   code: string
   status: StatusTypes
+  phase?: PhaseTypes // Player-facing phase for display
   contentKey: StatusTypes
   session: {
     playerId: string

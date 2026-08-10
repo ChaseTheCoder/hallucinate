@@ -1,4 +1,5 @@
 import { Game, GameStore, Player, PlayerProjection } from '../types/types'
+import { getPhaseForStep } from '../config/phases'
 import { Pool } from 'pg'
 import type { Server as SocketIOServer } from 'socket.io'
 
@@ -83,7 +84,7 @@ export async function createGame(): Promise<Game> {
     code,
     started: false,
     status: 'join',
-    cycleTime: 300,
+    cycleTime: 15,
     players: [],
     rounds: [],
     currentRound: 0,
@@ -211,7 +212,8 @@ export function enrichGame(game: Game): Game {
   return {
     ...game,
     adminPlayerId: game.players.find(p => p.isAdmin)?.id ?? undefined,
-    currentBarredPlayerIds: game.rounds[game.currentRound]?.barred ?? []
+    currentBarredPlayerIds: game.rounds[game.currentRound]?.barred ?? [],
+    phase: getPhaseForStep(game.status) ?? undefined,
   }
 }
 
@@ -223,6 +225,7 @@ export function buildPlayerProjection(game: Game, player: Player): PlayerProject
   const projection: PlayerProjection = {
     code: game.code,
     status: game.status,
+    phase: getPhaseForStep(game.status) ?? undefined,
     contentKey: game.status,
     session: {
       playerId: player.id,

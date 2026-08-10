@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Game } from '../../types/types'
+import { Game, PhaseTypes } from '../../types/types'
+import { getPhaseForStep, getNavPhases, PHASE_DISPLAY_NAMES } from '../../config/phases'
 import Text from '../Text'
 import ButtonLiquid from '../ButtonLiquid'
 import GlassBubble from '../GlassBubble'
@@ -13,33 +14,32 @@ type NavProps = {
 }
 
 export default function Nav({ gameStatus, code, connected, qualifiedPlayersCount, onEndGame }: NavProps) {
-	const gameStatusDisplay: Game['status'][] = qualifiedPlayersCount === 2 && gameStatus !== 'announcement'
-		? ['campaign', 'vote', 'final']
-		: ['campaign', 'vote', 'results', 'decision', 'announcement']
-	const [displayedStatus, setDisplayedStatus] = useState<Game['status'] | undefined>(gameStatus)
+	const currentPhase = gameStatus ? getPhaseForStep(gameStatus) : null
+	const phaseDisplay = getNavPhases(qualifiedPlayersCount ?? 0, currentPhase)
+	const [displayedPhase, setDisplayedPhase] = useState<PhaseTypes | null>(currentPhase)
 	const [statusPhase, setStatusPhase] = useState<'in' | 'out'>('in')
 	const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	useEffect(() => {
-		if (gameStatus === displayedStatus) return
+		if (currentPhase === displayedPhase) return
 
 		if (transitionTimeoutRef.current) {
 			clearTimeout(transitionTimeoutRef.current)
 		}
 
-		if (!displayedStatus) {
-			setDisplayedStatus(gameStatus)
+		if (!displayedPhase) {
+			setDisplayedPhase(currentPhase)
 			setStatusPhase('in')
 			return
 		}
 
 		setStatusPhase('out')
 		transitionTimeoutRef.current = setTimeout(() => {
-			setDisplayedStatus(gameStatus)
+			setDisplayedPhase(currentPhase)
 			setStatusPhase('out')
 			requestAnimationFrame(() => setStatusPhase('in'))
 		}, 220)
-	}, [gameStatus, displayedStatus])
+	}, [currentPhase, displayedPhase])
 
 	useEffect(() => {
 		return () => {
@@ -67,10 +67,10 @@ export default function Nav({ gameStatus, code, connected, qualifiedPlayersCount
 				</div>
 
                 <div style={{ flexDirection: 'row', display: 'flex', alignItems: 'center', gap: 16 }}>
-					{gameStatusDisplay.map((status) => (
-						displayedStatus === status ? (
+					{phaseDisplay.map((phase) => (
+						displayedPhase === phase ? (
 							<GlassBubble
-								key={status}
+								key={phase}
 								style={{
 									padding: '8px 16px',
 									opacity: statusPhase === 'out' ? 0 : 1,
@@ -78,13 +78,13 @@ export default function Nav({ gameStatus, code, connected, qualifiedPlayersCount
 								}}
 							>
 								<Text color="text-primary" size={1.2} bold allCaps>
-									{status}
+									{PHASE_DISPLAY_NAMES[phase]}
 								</Text>
 							</GlassBubble>
 						) : (
-							<div style={{ padding: '8px 16px', borderRadius: '40px', backgroundColor: 'transparent', boxShadow: 'none' }} key={status}>
+							<div style={{ padding: '8px 16px', borderRadius: '40px', backgroundColor: 'transparent', boxShadow: 'none' }} key={phase}>
 								<Text color="text-secondary" size={1.2} bold allCaps>
-									{status}
+									{PHASE_DISPLAY_NAMES[phase]}
 								</Text>
 							</div>
 						)
