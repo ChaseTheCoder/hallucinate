@@ -1,6 +1,6 @@
 import type { Game } from '../../types/types'
 import { gameContent, barAnotherAnnouncementExtension, selfImmunityAnnouncementExtension, grantImmunityAnnouncementExtension } from '../../content/content'
-import { getHostNarrationSegment } from '../../content/hostNarration'
+import { getHostNarrationSegment, flattenHostMessages } from '../../content/hostNarration'
 
 const SUPPORTED_STATUS_MUSIC = new Set<Game['status']>(['join', 'rules', 'campaign', 'vote', 'results', 'decision', 'announcement', 'final'])
 
@@ -20,6 +20,19 @@ export function getJoinMusicUrl() {
 
 export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], executiveDecision?: Game['executiveDecision']) {
 	const baseContent = gameContent[gameStatus as keyof typeof gameContent]
+
+	// Rules is the only status whose hostMessage is nested; flatten it so downstream
+	// consumers (message count/indexing, on-screen rendering) see a flat array. This
+	// intentionally returns a NEW object (not baseContent as-is) — callers must not rely
+	// on reference equality against gameContent.rules for this status.
+	if (gameStatus === 'rules') {
+		return { ...baseContent, hostMessage: flattenHostMessages(baseContent.hostMessage) }
+	}
+
+	// Every other status keeps returning baseContent unchanged (same reference) unless an
+	// executive-decision extension applies below — pages/host/[code].tsx compares
+	// `content === gameContent[status]` by reference to gate reveal timing, so this must
+	// stay a passthrough whenever nothing is actually being extended.
 	if (gameStatus !== 'announcement') return baseContent
 
 	if (executiveDecision === 'bar_another') {

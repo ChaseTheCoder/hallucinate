@@ -13,6 +13,7 @@ import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment } from '../../content/ho
 import updateGame from '../../utils/updateGame'
 import useStatusMusic from '../../utils/host/useStatusMusic'
 import { formatHostMessage, getExtendedAnnouncementHostMessages, shouldHostMessageBeBold } from '../../utils/host/utils'
+import { getHostMessageAudioText, getHostMessageDisplayText, isHostMessageHeading, type HostMessageEntry } from '../../content/hostNarration'
 
 let socket: Socket | null = null
 const AUTO_TRANSITION_STATUSES: Game['status'][] = ['rules', 'results', 'announcement']
@@ -22,7 +23,7 @@ export default function HostPage() {
   const { code } = router.query
   const gameCode = Array.isArray(code) ? code[0] : code
   const [game, setGame] = useState<Game | null>(null)
-  const [content, setContent] = useState<typeof gameContent[keyof typeof gameContent] | null>(null)
+  const [content, setContent] = useState<ReturnType<typeof getExtendedAnnouncementHostMessages> | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [gameExists, setGameExists] = useState(true)
   const [didLoadAttempted, setDidLoadAttempted] = useState(false)
@@ -49,6 +50,7 @@ export default function HostPage() {
   const [grantedImmunityPlayerName, setGrantedImmunityPlayerName] = useState<string | null>(null)
   const [displayedHostMessages, setDisplayedHostMessages] = useState<string[]>(['Loading...'])
   const [displayedMessageIndices, setDisplayedMessageIndices] = useState<number[]>([0])
+  const [displayedIsHeading, setDisplayedIsHeading] = useState<boolean[]>([false])
   const [isLeaderRevealed, setIsLeaderRevealed] = useState(false)
   const [isBarredRevealed, setIsBarredRevealed] = useState(false)
   const [isED1BarredRevealed, setIsED1BarredRevealed] = useState(false)
@@ -542,36 +544,50 @@ export default function HostPage() {
     if (loadError) {
       setDisplayedHostMessages([loadError])
       setDisplayedMessageIndices([0])
+      setDisplayedIsHeading([false])
       return
     }
 
     if (isLoading) {
       setDisplayedHostMessages(['Loading...'])
       setDisplayedMessageIndices([0])
+      setDisplayedIsHeading([false])
       return
     }
 
     if (!content?.hostMessage) {
       setDisplayedHostMessages(['Waiting...'])
       setDisplayedMessageIndices([0])
+      setDisplayedIsHeading([false])
       return
     }
 
     if (Array.isArray(content.hostMessage)) {
-      // For 'rules' status, find the most recent "Phase" message and only show from there
+      const hostMessageEntries = content.hostMessage as HostMessageEntry[]
+      const isRules = game?.status === 'rules'
+
+      // For 'rules' status, find the most recent heading and only show from there — each
+      // heading's display text (bold) plus its nested lines revealing one at a time as
+      // their audio plays. isHeading is structural (derived from nested `content` in
+      // content.ts), not text-sniffed, so it's correct regardless of a heading's wording.
       let startIndex = 0
-      if (game?.status === 'rules') {
+      if (isRules) {
         for (let i = messageIndex; i >= 0; i--) {
-          if (content.hostMessage[i]?.startsWith('Phase')) {
+          const entry = hostMessageEntries[i]
+          if (entry !== undefined && isHostMessageHeading(entry)) {
             startIndex = i
             break
           }
         }
       }
 
-      // Build array of messages from startIndex to current messageIndex
-      const messages = content.hostMessage.slice(startIndex, messageIndex + 1).map(msg => 
-        msg
+      const slice = hostMessageEntries.slice(startIndex, messageIndex + 1)
+
+      // Rules shows the short display caption; every other status still shows the full
+      // narration line (display isn't authored for those — audio and display are the
+      // same text there).
+      const messages = slice.map(entry =>
+        (isRules ? getHostMessageDisplayText(entry) : getHostMessageAudioText(entry))
           .replace('{LEADER_NAME}', leaderName || 'TBD')
           .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
           .replace('{ED1_PLAYER_NAME}', secondBarredName || 'TBD')
@@ -582,10 +598,12 @@ export default function HostPage() {
           .replace('{WINNER_POINTS}', winnerPoints.toString())
           .replace('{LOSER_POINTS}', loserPoints.toString())
       )
+      const headingFlags = slice.map(entry => isHostMessageHeading(entry))
       // Track original indices for each displayed message
       const indices = Array.from({ length: messageIndex - startIndex + 1 }, (_, i) => startIndex + i)
       setDisplayedHostMessages(messages)
       setDisplayedMessageIndices(indices)
+      setDisplayedIsHeading(headingFlags)
     }
   }, [
     game?.status,
@@ -738,7 +756,8 @@ export default function HostPage() {
           }}>
             {displayedHostMessages.map((message, index) => {
               const originalIndex = displayedMessageIndices[index] ?? index
-              const isBold = shouldHostMessageBeBold(game?.status, message, originalIndex, game?.executiveDecision)
+              const isBold = (displayedIsHeading[index] ?? false)
+                || shouldHostMessageBeBold(game?.status, message, originalIndex, game?.executiveDecision)
               return (
                 <Text key={index} size={isBold ? 1.75 : 1.5} color='text-primary' bold={isBold} style={{ marginBottom: index < displayedHostMessages.length - 1 ? '0.5rem' : 0 }}>
                   {formatHostMessage(message, {
