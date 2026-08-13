@@ -32,6 +32,7 @@ import {
   barAnotherAnnouncementExtension,
   selfImmunityAnnouncementExtension,
   grantImmunityAnnouncementExtension,
+  introductionAnnouncementExtension,
 } from '../content/content'
 import { flattenHostMessages, getHostMessageAudioText, isDynamicTokenLine } from '../content/hostNarration'
 import type { StatusTypes } from '../types/types'
@@ -39,7 +40,7 @@ import type { StatusTypes } from '../types/types'
 // Appended to announcement.hostMessage at runtime based on the leader's executive
 // decision (see getEffectiveHostMessages/getExtendedAnnouncementHostMessages) — not part
 // of gameContent[status].hostMessage, so they need to be scanned separately here.
-const EXECUTIVE_DECISION_EXTENSIONS: string[] = [
+const EXECUTIVE_DECISION_EXTENSIONS: unknown[] = [
   ...barAnotherAnnouncementExtension,
   ...selfImmunityAnnouncementExtension,
   ...grantImmunityAnnouncementExtension,
@@ -75,12 +76,17 @@ function objectKeyForText(text: string): string {
   return `${V2_PREFIX}/${hashText(text)}.mp3`
 }
 
+// Bare domain/URL text (e.g. "hallucinate.onrender.com") — no spaces, dot-separated
+// segments, no sentence punctuation. Meant to be read on screen, not spoken aloud; TTS
+// reading a URL literally ("hallucinate dot onrender dot com") sounds wrong.
+const URL_LINE_PATTERN = /^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i
+
 function addLine(lines: Map<string, string>, rawText: string): void {
   const text = rawText.trim()
   // Pure {TOKEN} lines (e.g. "{LEADER_NAME}", "{ED1_PLAYER_NAME}") are never spoken by
   // the app — see hasDynamicTokens handling in pages/host/[code].tsx — so skip generating
   // audio for them.
-  if (!text || isDynamicTokenLine(text)) return
+  if (!text || isDynamicTokenLine(text) || URL_LINE_PATTERN.test(text)) return
   lines.set(objectKeyForText(text), text)
 }
 
@@ -96,8 +102,15 @@ function collectAudioLines(statuses: StatusTypes[]): Map<string, string> {
 
   // Executive-decision announcement extensions aren't scoped to any single status filter
   // above (they're always appended to 'announcement' at runtime) — always scan them.
-  for (const text of EXECUTIVE_DECISION_EXTENSIONS) {
-    addLine(lines, text)
+  for (const entry of flattenHostMessages(EXECUTIVE_DECISION_EXTENSIONS)) {
+    addLine(lines, getHostMessageAudioText(entry))
+  }
+
+  // 'intro' has no gameContent.intro entry (its narration is sequenced directly by the
+  // host page's intro-sequence effect, not the generic per-status system) — scan its
+  // {audio, display} entries directly, same shape as rules' content, no nesting.
+  for (const entry of flattenHostMessages(introductionAnnouncementExtension)) {
+    addLine(lines, getHostMessageAudioText(entry))
   }
 
   return lines

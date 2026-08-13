@@ -2,7 +2,7 @@ import type { Game } from '../../types/types'
 import { gameContent, barAnotherAnnouncementExtension, selfImmunityAnnouncementExtension, grantImmunityAnnouncementExtension } from '../../content/content'
 import { getHostNarrationSegment, flattenHostMessages } from '../../content/hostNarration'
 
-const SUPPORTED_STATUS_MUSIC = new Set<Game['status']>(['join', 'rules', 'campaign', 'vote', 'results', 'decision', 'announcement', 'final'])
+const SUPPORTED_STATUS_MUSIC = new Set<Game['status']>(['join', 'intro', 'rules', 'campaign', 'vote', 'results', 'decision', 'announcement', 'final'])
 
 export function getStatusMusicUrl(status?: Game['status'] | null) {
 	if (!status || !SUPPORTED_STATUS_MUSIC.has(status)) return null
@@ -18,54 +18,24 @@ export function getJoinMusicUrl() {
 	return getStatusMusicUrl('join')
 }
 
+// Every status's hostMessage is now the same {id,audio,display,content?} shape, so this
+// flattens uniformly for all of them — not just rules. It always returns a NEW object
+// (never baseContent as-is), since executive-decision extensions need to be combined with
+// the raw entries BEFORE a single flatten pass. Callers must not rely on reference
+// equality against gameContent[status] — see the contentStatusRef tracking in
+// pages/host/[code].tsx, which exists specifically because of this.
 export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], executiveDecision?: Game['executiveDecision']) {
 	const baseContent = gameContent[gameStatus as keyof typeof gameContent]
+	const baseEntries = Array.isArray(baseContent?.hostMessage) ? baseContent.hostMessage : []
+	const rawEntries: unknown[] = [...baseEntries]
 
-	// Rules is the only status whose hostMessage is nested; flatten it so downstream
-	// consumers (message count/indexing, on-screen rendering) see a flat array. This
-	// intentionally returns a NEW object (not baseContent as-is) — callers must not rely
-	// on reference equality against gameContent.rules for this status.
-	if (gameStatus === 'rules') {
-		return { ...baseContent, hostMessage: flattenHostMessages(baseContent.hostMessage) }
+	if (gameStatus === 'announcement') {
+		if (executiveDecision === 'bar_another') rawEntries.push(...barAnotherAnnouncementExtension)
+		else if (executiveDecision === 'self_immunity_next_cycle') rawEntries.push(...selfImmunityAnnouncementExtension)
+		else if (executiveDecision === 'grant_immunity_next_cycle') rawEntries.push(...grantImmunityAnnouncementExtension)
 	}
 
-	// Every other status keeps returning baseContent unchanged (same reference) unless an
-	// executive-decision extension applies below — pages/host/[code].tsx compares
-	// `content === gameContent[status]` by reference to gate reveal timing, so this must
-	// stay a passthrough whenever nothing is actually being extended.
-	if (gameStatus !== 'announcement') return baseContent
-
-	if (executiveDecision === 'bar_another') {
-		return {
-			...baseContent,
-			hostMessage: [
-				...(baseContent.hostMessage as string[]),
-				...barAnotherAnnouncementExtension
-			]
-		}
-	}
-
-	if (executiveDecision === 'self_immunity_next_cycle') {
-		return {
-			...baseContent,
-			hostMessage: [
-				...(baseContent.hostMessage as string[]),
-				...selfImmunityAnnouncementExtension
-			]
-		}
-	}
-
-	if (executiveDecision === 'grant_immunity_next_cycle') {
-		return {
-			...baseContent,
-			hostMessage: [
-				...(baseContent.hostMessage as string[]),
-				...grantImmunityAnnouncementExtension
-			]
-		}
-	}
-
-	return baseContent
+	return { ...baseContent, hostMessage: flattenHostMessages(rawEntries) }
 }
 
 export function formatHostMessage(

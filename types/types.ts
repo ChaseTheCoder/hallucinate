@@ -19,7 +19,7 @@ export interface GameRound {
   roundStartTime: number // timestamp
 }
 
-export type StatusTypes = 'join' | 'rules' | 'campaign' | 'vote' | 'results' | 'decision' | 'announcement' | 'final'
+export type StatusTypes = 'join' | 'intro' | 'rules' | 'campaign' | 'vote' | 'results' | 'decision' | 'announcement' | 'final'
 
 // Player-facing phase (Rule of Three): campaign / election / executive / final
 export type PhaseTypes = 'campaign' | 'election' | 'executive' | 'final'

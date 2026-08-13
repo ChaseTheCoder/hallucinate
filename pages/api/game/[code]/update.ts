@@ -44,9 +44,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       // State transitions
       if (currentStatus === 'join' && game.players.length >= 4) {
-        newStatus = 'rules'
+        newStatus = 'intro'
         // Qualify all players at start for testing
         game.players.forEach(p => p.isQualified = true)
+      } else if (currentStatus === 'intro') {
+        newStatus = 'rules'
       } else if (currentStatus === 'rules') {
         newStatus = 'campaign'
       } else if (currentStatus === 'campaign') {

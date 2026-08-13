@@ -104,20 +104,32 @@ function buildAudioUrl(audioObjectKey: string | null): string | null {
   return `${normalized}/${audioObjectKey}`
 }
 
-function getExecutiveDecisionAnnouncementExtension(executiveDecision?: ExecutiveDecisionType): string[] {
+// For narration sequenced outside the generic per-status system (e.g. the 'intro'
+// sequence, which plays introductionAnnouncementExtension directly rather than through
+// getHostNarrationSegment) — resolves a line of text straight to its v2 audio URL.
+export function getAudioUrlForText(text: string): string | null {
+  return buildAudioUrl(buildAudioObjectKey(text))
+}
+
+function getExecutiveDecisionAnnouncementExtension(executiveDecision?: ExecutiveDecisionType): unknown[] {
   if (executiveDecision === 'bar_another') return barAnotherAnnouncementExtension
   if (executiveDecision === 'self_immunity_next_cycle') return selfImmunityAnnouncementExtension
   if (executiveDecision === 'grant_immunity_next_cycle') return grantImmunityAnnouncementExtension
   return []
 }
 
+// Combine raw entries (base status + any executive-decision extension) BEFORE flattening,
+// so a single flattenHostMessages() pass resolves both — every entry (base or extension)
+// goes through the exact same {id,audio,display,content?} handling either way.
 function getEffectiveHostMessages(status: StatusTypes, executiveDecision?: ExecutiveDecisionType): string[] {
-  const baseMessages = asHostMessages(gameContent[status]?.hostMessage)
-  if (status !== 'announcement') return baseMessages
+  const baseEntries = gameContent[status]?.hostMessage
+  const rawEntries: unknown[] = Array.isArray(baseEntries) ? [...baseEntries] : []
 
-  const extensionMessages = getExecutiveDecisionAnnouncementExtension(executiveDecision)
-  if (!extensionMessages.length) return baseMessages
-  return [...baseMessages, ...extensionMessages]
+  if (status === 'announcement') {
+    rawEntries.push(...getExecutiveDecisionAnnouncementExtension(executiveDecision))
+  }
+
+  return flattenHostMessages(rawEntries).map(line => line.audio)
 }
 
 function logExecutiveDecisionAudio(event: string, data: Record<string, unknown>) {
@@ -202,6 +214,10 @@ export function getHostNarrationSegment(status: StatusTypes, index: number, exec
 export function getHostNarrationManifest(): Record<StatusTypes, HostNarrationSegment[]> {
   return {
     join: getHostNarrationSegments('join'),
+    // 'intro' has no gameContent.intro.hostMessage entry — its narration comes from
+    // introductionAnnouncementExtension and is sequenced directly by the host page's own
+    // intro-sequence effect, not through the generic per-status narration segment system.
+    intro: [],
     rules: getHostNarrationSegments('rules'),
     campaign: getHostNarrationSegments('campaign'),
     vote: getHostNarrationSegments('vote'),

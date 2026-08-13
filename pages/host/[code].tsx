@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Text from '../../components/Text'
 import { useRouter } from 'next/router'
 import io, { Socket } from 'socket.io-client'
@@ -8,15 +8,34 @@ import Right from '../../components/host/Right'
 import Popover from '../../components/Popover'
 import ButtonLiquid from '../../components/ButtonLiquid'
 import { Game } from '../../types/types'
-import { gameContent } from '../../content/content'
-import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment } from '../../content/hostNarration'
+import { gameContent, introductionAnnouncementExtension } from '../../content/content'
+import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment, getAudioUrlForText } from '../../content/hostNarration'
 import updateGame from '../../utils/updateGame'
 import useStatusMusic from '../../utils/host/useStatusMusic'
 import { formatHostMessage, getExtendedAnnouncementHostMessages, shouldHostMessageBeBold } from '../../utils/host/utils'
-import { getHostMessageAudioText, getHostMessageDisplayText, isHostMessageHeading, type HostMessageEntry } from '../../content/hostNarration'
+import { getHostMessageDisplayText, isHostMessageHeading, type HostMessageEntry } from '../../content/hostNarration'
 
 let socket: Socket | null = null
 const AUTO_TRANSITION_STATUSES: Game['status'][] = ['rules', 'results', 'announcement']
+
+// Timing for the 'intro' sequence, per spec: ~3s total for the 3 components to fade out
+// (1s each, sequential), a "slow" fade for text elements, and a 2s gap between each
+// narration clip for entry 0's title/noun/definition trio.
+const INTRO_COMPONENT_FADE_MS = 1000
+const INTRO_TEXT_FADE_MS = 2000
+const INTRO_AUDIO_GAP_MS = 2000
+// Window over which the title's non-"lucin" letters fade away at random, each with its
+// own randomly-staggered start so they don't all disappear in lockstep.
+const INTRO_LETTER_SCRAMBLE_MS = 2000
+const INTRO_LETTER_FADE_MS = 400
+// 'lucin' alone holds on screen this long before it, too, fades away.
+const INTRO_LUCIN_HOLD_MS = 5000
+// Extra dramatic pause before the last entry (the "twist") displays/plays.
+const INTRO_FINAL_PAUSE_MS = 5000
+
+// content.ts doesn't declare an explicit type for this export; entry 0 nests noun+definition
+// under `content` (same shape as rules' heading+content), the rest are flat {audio,display}.
+type IntroEntry = { audio: string; display: string; content?: { audio: string; display: string }[] }
 
 export default function HostPage() {
   const router = useRouter()
@@ -64,6 +83,44 @@ export default function HostPage() {
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animationFrameRef = useRef<number | null>(null)
   const autoTransitionedStatusRef = useRef<Game['status'] | null>(null)
+  // Which (status, executiveDecision) the current `content` state was built for. Needed
+  // because getExtendedAnnouncementHostMessages now always returns a fresh object (every
+  // status is flattened uniformly), so `content === gameContent[status]` can no longer be
+  // used to detect "has content caught up to the current game status yet".
+  const contentStatusRef = useRef<{ status: Game['status'] | undefined; executiveDecision: Game['executiveDecision'] | undefined } | null>(null)
+
+  // 'intro' sequence state: nav/right/left fade out, music + definition card fade in,
+  // narration plays, then a multi-step exit (definition, then noun, then title letters
+  // scrambling away except "lucin"), then the remaining entries each fade in/play/fade out,
+  // then components fade back in and the game advances to 'rules'.
+  const [navVisible, setNavVisible] = useState(true)
+  const [rightVisible, setRightVisible] = useState(true)
+  const [leftVisible, setLeftVisible] = useState(true)
+  const [introMusicReady, setIntroMusicReady] = useState(false)
+  const [introOverlayVisible, setIntroOverlayVisible] = useState(false)
+  const [introDefinitionVisible, setIntroDefinitionVisible] = useState(true)
+  const [introNounVisible, setIntroNounVisible] = useState(true)
+  const [introTitleLettersFading, setIntroTitleLettersFading] = useState(false)
+  const [introLucinVisible, setIntroLucinVisible] = useState(true)
+  const [introEntryZeroVisible, setIntroEntryZeroVisible] = useState(true)
+  const [introContinuationText, setIntroContinuationText] = useState<string | null>(null)
+  const [introContinuationVisible, setIntroContinuationVisible] = useState(false)
+
+  const introEntries = introductionAnnouncementExtension as IntroEntry[]
+  const introTitleEntry = introEntries[0]
+  const introNounEntry = introTitleEntry?.content?.[0]
+  const introDefinitionEntry = introTitleEntry?.content?.[1]
+  const introTitleText = introTitleEntry?.display ?? ''
+  const introLucinStart = introTitleText.toLowerCase().indexOf('lucin')
+  // Stable per-letter random fade delays (recomputed only if the title text changes),
+  // so re-renders during the sequence don't reshuffle which letter fades when.
+  const introLetterFadeDelays = useMemo(() => {
+    return introTitleText.split('').map((_, i) => {
+      const isKept = introLucinStart !== -1 && i >= introLucinStart && i < introLucinStart + 5
+      if (isKept) return null
+      return Math.random() * Math.max(0, INTRO_LETTER_SCRAMBLE_MS - INTRO_LETTER_FADE_MS)
+    })
+  }, [introTitleText, introLucinStart])
 
   const handleTransition = useCallback(async () => {
     if (!gameCode) return
@@ -74,7 +131,11 @@ export default function HostPage() {
     }
   }, [gameCode])
 
-  useStatusMusic(game?.status, isNarrationPlaying)
+  // Music for 'intro' shouldn't start until the fade-out sequence below marks it ready —
+  // feed useStatusMusic a status of undefined (= no music) until then, otherwise it would
+  // start playing the instant game.status flips to 'intro', before anything's even hidden.
+  const musicStatus = game?.status === 'intro' && !introMusicReady ? undefined : game?.status
+  useStatusMusic(musicStatus, isNarrationPlaying)
 
   // socket connection and game state management
   useEffect(() => {
@@ -226,10 +287,11 @@ export default function HostPage() {
   }, [gameCode])
 
   useEffect(() => {
-    const currentStatusContent = game?.status
-      ? gameContent[game.status as keyof typeof gameContent]
-      : null
-    const hasLoadedCurrentStatusContent = Boolean(currentStatusContent && content === currentStatusContent)
+    const hasLoadedCurrentStatusContent = Boolean(
+      contentStatusRef.current
+      && contentStatusRef.current.status === game?.status
+      && contentStatusRef.current.executiveDecision === game?.executiveDecision
+    )
     const hasReachedLastMessage = hasLoadedCurrentStatusContent
       && Array.isArray(content?.hostMessage)
       && messageIndex >= content.hostMessage.length - 1
@@ -364,6 +426,7 @@ export default function HostPage() {
     if (game?.status) {
       const gameStatus = game.status as keyof typeof gameContent
       setContent(getExtendedAnnouncementHostMessages(gameStatus, game.executiveDecision))
+      contentStatusRef.current = { status: game.status, executiveDecision: game.executiveDecision }
       setMessageIndex(0)
     }
   }, [game?.status, game?.executiveDecision])
@@ -564,30 +627,26 @@ export default function HostPage() {
 
     if (Array.isArray(content.hostMessage)) {
       const hostMessageEntries = content.hostMessage as HostMessageEntry[]
-      const isRules = game?.status === 'rules'
 
-      // For 'rules' status, find the most recent heading and only show from there — each
-      // heading's display text (bold) plus its nested lines revealing one at a time as
-      // their audio plays. isHeading is structural (derived from nested `content` in
-      // content.ts), not text-sniffed, so it's correct regardless of a heading's wording.
+      // Find the most recent heading and only show from there — applies uniformly to
+      // every status now (every status uses the same {id,audio,display,content?} shape).
+      // It's a no-op for statuses with no headings (startIndex just stays 0, i.e. show
+      // everything from the start, same as before). isHeading is structural (derived from
+      // nested `content` in content.ts), not text-sniffed, so it's correct regardless of a
+      // heading's wording.
       let startIndex = 0
-      if (isRules) {
-        for (let i = messageIndex; i >= 0; i--) {
-          const entry = hostMessageEntries[i]
-          if (entry !== undefined && isHostMessageHeading(entry)) {
-            startIndex = i
-            break
-          }
+      for (let i = messageIndex; i >= 0; i--) {
+        const entry = hostMessageEntries[i]
+        if (entry !== undefined && isHostMessageHeading(entry)) {
+          startIndex = i
+          break
         }
       }
 
       const slice = hostMessageEntries.slice(startIndex, messageIndex + 1)
 
-      // Rules shows the short display caption; every other status still shows the full
-      // narration line (display isn't authored for those — audio and display are the
-      // same text there).
       const messages = slice.map(entry =>
-        (isRules ? getHostMessageDisplayText(entry) : getHostMessageAudioText(entry))
+        getHostMessageDisplayText(entry)
           .replace('{LEADER_NAME}', leaderName || 'TBD')
           .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
           .replace('{ED1_PLAYER_NAME}', secondBarredName || 'TBD')
@@ -653,6 +712,155 @@ export default function HostPage() {
     autoTransitionedStatusRef.current = null
   }, [game?.status])
 
+  // 'intro' sequence, run once per entry into the status. Fully self-contained — doesn't
+  // touch the generic messageIndex/narration state machine used by every other status.
+  useEffect(() => {
+    if (game?.status !== 'intro') {
+      // Not (or no longer) in intro — make sure everything's in its resting state so a
+      // future 'intro' entry starts clean.
+      setNavVisible(true)
+      setRightVisible(true)
+      setLeftVisible(true)
+      setIntroMusicReady(false)
+      setIntroOverlayVisible(false)
+      setIntroDefinitionVisible(true)
+      setIntroNounVisible(true)
+      setIntroTitleLettersFading(false)
+      setIntroLucinVisible(true)
+      setIntroEntryZeroVisible(true)
+      setIntroContinuationText(null)
+      setIntroContinuationVisible(false)
+      return
+    }
+
+    let isCancelled = false
+    const pendingTimeouts: ReturnType<typeof setTimeout>[] = []
+    const pendingAudios: HTMLAudioElement[] = []
+
+    const wait = (ms: number) => new Promise<void>(resolve => {
+      pendingTimeouts.push(setTimeout(resolve, ms))
+    })
+
+    const playClip = (url: string) => new Promise<void>(resolve => {
+      const audio = new Audio(url)
+      pendingAudios.push(audio)
+      audio.crossOrigin = 'anonymous'
+      audio.addEventListener('ended', () => resolve(), { once: true })
+      audio.addEventListener('error', () => resolve(), { once: true })
+      audio.play().catch(() => resolve())
+    })
+
+    const run = async () => {
+      // 1. Nav fades out, then Right, then Left — ~3s total.
+      setNavVisible(false)
+      await wait(INTRO_COMPONENT_FADE_MS)
+      if (isCancelled) return
+      setRightVisible(false)
+      await wait(INTRO_COMPONENT_FADE_MS)
+      if (isCancelled) return
+      setLeftVisible(false)
+      await wait(INTRO_COMPONENT_FADE_MS)
+      if (isCancelled) return
+
+      // 2. Once fully hidden, start the intro music (music/intro/0).
+      setIntroMusicReady(true)
+
+      const entryZero = introEntries[0]
+      const nounEntry = entryZero?.content?.[0]
+      const definitionEntry = entryZero?.content?.[1]
+
+      // 3. Card (title + noun + definition) fades in together.
+      setIntroOverlayVisible(true)
+      await wait(INTRO_TEXT_FADE_MS)
+      if (isCancelled) return
+
+      // 4. Play title, noun, definition audio in order — 2s gap between each (not after the last).
+      const entryZeroClips = [entryZero?.audio, nounEntry?.audio, definitionEntry?.audio]
+        .filter((text): text is string => Boolean(text))
+      for (let i = 0; i < entryZeroClips.length; i++) {
+        if (isCancelled) return
+        const audioUrl = getAudioUrlForText(entryZeroClips[i])
+        if (audioUrl) await playClip(audioUrl)
+        if (isCancelled) return
+        const isLast = i === entryZeroClips.length - 1
+        if (!isLast) await wait(INTRO_AUDIO_GAP_MS)
+      }
+      if (isCancelled) return
+
+      // 5. Definition fades away, then 'noun' fades away.
+      setIntroDefinitionVisible(false)
+      await wait(INTRO_TEXT_FADE_MS)
+      if (isCancelled) return
+      setIntroNounVisible(false)
+      await wait(INTRO_TEXT_FADE_MS)
+      if (isCancelled) return
+
+      // 6. Title letters fade away at random, except "lucin" — over ~2s.
+      setIntroTitleLettersFading(true)
+      await wait(INTRO_LETTER_SCRAMBLE_MS)
+      if (isCancelled) return
+
+      // 7. 'lucin' alone, visible for 5s, then fades away.
+      await wait(INTRO_LUCIN_HOLD_MS)
+      if (isCancelled) return
+      setIntroLucinVisible(false)
+      await wait(INTRO_TEXT_FADE_MS)
+      if (isCancelled) return
+
+      // Entry 0 is fully gone — drop it from layout so the continuation line below centers cleanly.
+      setIntroEntryZeroVisible(false)
+
+      // 8. Continue through the remaining entries: audio starts the instant the fade-in
+      // begins (not after it finishes) — only entry 0's title/noun/definition trio waits
+      // for its fade to complete first. A special 5s pause happens before the LAST entry.
+      for (let i = 1; i < introEntries.length; i++) {
+        if (isCancelled) return
+        const entry = introEntries[i]
+        const isLastEntry = i === introEntries.length - 1
+
+        if (isLastEntry) {
+          await wait(INTRO_FINAL_PAUSE_MS)
+          if (isCancelled) return
+        }
+
+        setIntroContinuationText(entry.display)
+        setIntroContinuationVisible(true)
+
+        const audioUrl = getAudioUrlForText(entry.audio)
+        if (audioUrl) await playClip(audioUrl)
+        if (isCancelled) return
+
+        setIntroContinuationVisible(false)
+        await wait(INTRO_TEXT_FADE_MS)
+        if (isCancelled) return
+      }
+
+      setIntroOverlayVisible(false)
+
+      // 9. Fade components back in — Left, then Right, then Nav (mirrors fade-out order).
+      setLeftVisible(true)
+      await wait(INTRO_COMPONENT_FADE_MS)
+      if (isCancelled) return
+      setRightVisible(true)
+      await wait(INTRO_COMPONENT_FADE_MS)
+      if (isCancelled) return
+      setNavVisible(true)
+      await wait(INTRO_COMPONENT_FADE_MS)
+      if (isCancelled) return
+
+      // 10. Last component finished fading in — advance to 'rules'.
+      handleTransition()
+    }
+
+    run()
+
+    return () => {
+      isCancelled = true
+      pendingTimeouts.forEach(clearTimeout)
+      pendingAudios.forEach(audio => audio.pause())
+    }
+  }, [game?.status, handleTransition])
+
   const handleEndGame = () => {
     setShowEndGamePopover(true)
   }
@@ -705,13 +913,101 @@ export default function HostPage() {
       flexDirection: 'column',
       position: 'relative'
     }}>
-      <Nav
-        gameStatus={game?.status}
-        code={gameCode}
-        connected={connected}
-        qualifiedPlayersCount={game?.players?.filter(player => player.isQualified).length}
-        onEndGame={handleEndGame}
-      />
+      {game?.status === 'intro' && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: introOverlayVisible ? 1 : 0,
+            transition: `opacity ${INTRO_TEXT_FADE_MS}ms ease`,
+            pointerEvents: 'none'
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: '60%' }}>
+            {introEntryZeroVisible && (
+              <>
+                <Text size={4} color='text-primary' bold style={{ fontFamily: 'inherit' }}>
+                  {introTitleText.split('').map((ch, i) => {
+                    const delay = introLetterFadeDelays[i]
+                    const isKept = delay === null
+                    const hidden = isKept ? !introLucinVisible : introTitleLettersFading
+                    const transitionMs = isKept ? INTRO_TEXT_FADE_MS : INTRO_LETTER_FADE_MS
+                    const transitionDelayMs = isKept ? 0 : (delay ?? 0)
+                    return (
+                      <span
+                        key={i}
+                        style={{
+                          opacity: hidden ? 0 : 1,
+                          transition: `opacity ${transitionMs}ms ease ${transitionDelayMs}ms`
+                        }}
+                      >
+                        {ch}
+                      </span>
+                    )
+                  })}
+                </Text>
+                <Text
+                  size={1.5}
+                  color='text-secondary'
+                  style={{
+                    fontFamily: 'inherit',
+                    opacity: introNounVisible ? 1 : 0,
+                    transition: `opacity ${INTRO_TEXT_FADE_MS}ms ease`
+                  }}
+                >
+                  {introNounEntry?.display}
+                </Text>
+                <div
+                  style={{
+                    width: '100%',
+                    borderBottom: '1px solid var(--color-accent-line)',
+                    opacity: introNounVisible ? 1 : 0,
+                    transition: `opacity ${INTRO_TEXT_FADE_MS}ms ease`
+                  }}
+                />
+                <Text
+                  size={1.75}
+                  color='text-primary'
+                  style={{
+                    fontFamily: 'inherit',
+                    opacity: introDefinitionVisible ? 1 : 0,
+                    transition: `opacity ${INTRO_TEXT_FADE_MS}ms ease`
+                  }}
+                >
+                  {introDefinitionEntry?.display}
+                </Text>
+              </>
+            )}
+            {introContinuationText && (
+              <Text
+                size={1.75}
+                color='text-primary'
+                style={{
+                  fontFamily: 'inherit',
+                  textAlign: 'center',
+                  opacity: introContinuationVisible ? 1 : 0,
+                  transition: `opacity ${INTRO_TEXT_FADE_MS}ms ease`
+                }}
+              >
+                {introContinuationText}
+              </Text>
+            )}
+          </div>
+        </div>
+      )}
+      <div style={{ opacity: navVisible ? 1 : 0, transition: `opacity ${INTRO_COMPONENT_FADE_MS}ms ease` }}>
+        <Nav
+          gameStatus={game?.status}
+          code={gameCode}
+          connected={connected}
+          qualifiedPlayersCount={game?.players?.filter(player => player.isQualified).length}
+          onEndGame={handleEndGame}
+        />
+      </div>
       <div
         style={{
           display: 'flex',
@@ -729,7 +1025,9 @@ export default function HostPage() {
           width: '70%',
           height: '100%',
           position: 'relative',
-          paddingTop: '15%'
+          paddingTop: '15%',
+          opacity: leftVisible ? 1 : 0,
+          transition: `opacity ${INTRO_COMPONENT_FADE_MS}ms ease`
         }}>
           <div style={{
             position: 'absolute',
@@ -782,12 +1080,14 @@ export default function HostPage() {
           </div>
         </div>
 
-        <Right
-          qualifiedPlayers={qualifiedPlayers}
-          sortedBarredPlayers={sortedBarredPlayers}
-          gameStatus={game?.status}
-          isLeaderRevealed={isLeaderRevealed}
-        />
+        <div style={{ flex: 4, width: '30%', height: '100%', opacity: rightVisible ? 1 : 0, transition: `opacity ${INTRO_COMPONENT_FADE_MS}ms ease` }}>
+          <Right
+            qualifiedPlayers={qualifiedPlayers}
+            sortedBarredPlayers={sortedBarredPlayers}
+            gameStatus={game?.status}
+            isLeaderRevealed={isLeaderRevealed}
+          />
+        </div>
       </div>
 
       <Popover 
