@@ -58,18 +58,48 @@ export const introductionAnnouncementExtension = [
   },
 ]
 
-// Extra announcement messages appended when the leader chose bar another.
+// Extra announcement messages appended when the leader chose immunity_code.
 // These are appended to the standard announcement.hostMessage array on the host page.
-export const barAnotherAnnouncementExtension = [
+export const immunityCodeAnnouncementExtension = [
   {
     id: "74b6c938c6b543d8",
     audio: "Your leader also made an executive decision to...",
     display: "Your leader also made an executive decision to...",
   },
   {
-    id: "4d8b0e602dd81cfd",
-    audio: "bar another candidate...",
-    display: "bar another candidate...",
+    audio: "generate a code of immunity for a fellow candidate to claim in the next campaign cycle.",
+    display: "generate a code of immunity for a fellow candidate to claim in the next campaign cycle.",
+  },
+]
+
+export const requalifyCodeAnnouncementExtension = [
+  {
+    id: "74b6c938c6b543d8",
+    audio: "Your leader also made an executive decision to...",
+    display: "Your leader also made an executive decision to...",
+  },
+  {
+    audio: "generate a code that could return a barred candidate to qualification in the next campaign cycle.",
+    display: "generate a code that could return a barred candidate to qualification in the next campaign cycle.",
+  },
+]
+
+// barred_swap_chance is the only executive decision that pauses the standard one-way
+// narration: the {SWAP_WINDOW} entry is a structural marker (never displayed as text) that
+// the host page intercepts to activate a real-time 25s window and show a live countdown
+// instead of auto-advancing — see the swap-window effects in pages/host/[code].tsx.
+// {SWAP_RESULT} is likewise resolved dynamically (two very different outcomes) rather than
+// substituted into surrounding text, consistent with how other {TOKEN}-only lines carry no
+// pre-recorded audio.
+export const barredSwapAnnouncementExtension = [
+  {
+    id: "74b6c938c6b543d8",
+    audio: "Your leader also made an executive decision to...",
+    display: "Your leader also made an executive decision to...",
+  },
+  {
+    audio: "give one barred candidate a chance to reclaim their qualification...",
+    display: "give one barred candidate a chance to reclaim their qualification...",
   },
   {
     id: "df924a1569de1b6b",
@@ -77,44 +107,17 @@ export const barAnotherAnnouncementExtension = [
     display: "and that candidate is....",
   },
   {
-    audio: "{ED1_PLAYER_NAME}",
-    display: "{ED1_PLAYER_NAME}",
-  }
-]
-
-export const selfImmunityAnnouncementExtension = [
-  {
-    id: "74b6c938c6b543d8",
-    audio: "Your leader also made an executive decision to...",
-    display: "Your leader also made an executive decision to...",
+    audio: "{SWAP_CANDIDATE_NAME}",
+    display: "{SWAP_CANDIDATE_NAME}",
   },
   {
-    id: "d7c18a4c7d6cbda7",
-    audio: "grant themselves immunity in the next cycle.",
-    display: "grant themselves immunity in the next cycle.",
-  }
-]
-
-export const grantImmunityAnnouncementExtension = [
-  {
-    id: "74b6c938c6b543d8",
-    audio: "Your leader also made an executive decision to...",
-    display: "Your leader also made an executive decision to...",
+    audio: "{SWAP_WINDOW}",
+    display: "{SWAP_WINDOW}",
   },
   {
-    id: "d3d8b80888658b0a",
-    audio: "grant immunity to a fellow candidate in the next cycle.",
-    display: "grant immunity to a fellow candidate in the next cycle.",
+    audio: "{SWAP_RESULT}",
+    display: "{SWAP_RESULT}",
   },
-  {
-    id: "df924a1569de1b6b",
-    audio: "and that candidate is....",
-    display: "and that candidate is....",
-  },
-  {
-    audio: "{PLAYER_GRANTED_IMMUNITY}",
-    display: "{PLAYER_GRANTED_IMMUNITY}",
-  }
 ]
 
 export const gameContent = {

@@ -5,6 +5,9 @@ import ButtonLiquid from '../../components/ButtonLiquid'
 import VotePanel from '../../components/player/VotePanel'
 import PlayerHeader from '../../components/player/PlayerHeader'
 import LeaderDecisionPanel from '../../components/player/LeaderDecisionPanel'
+import CodeRedeemPanel from '../../components/player/CodeRedeemPanel'
+import ActiveCodeDisplay from '../../components/player/ActiveCodeDisplay'
+import SwapWindowPanel from '../../components/player/SwapWindowPanel'
 import Popover from '../../components/Popover'
 import { gameContent } from '../../content/content'
 import { ExecutiveDecisionType, PhaseTypes, PlayerProjection, StatusTypes } from '../../types/types'
@@ -12,6 +15,8 @@ import { PHASE_DISPLAY_NAMES } from '../../config/phases'
 import { submitVote } from '../../utils/player/submitVote'
 import { leaveGame } from '../../utils/player/leaveGame'
 import submitDecision from '../../utils/player/submitDecision'
+import redeemCode from '../../utils/player/redeemCode'
+import submitSwapChoice from '../../utils/player/submitSwapChoice'
 import updateGame from '../../utils/updateGame'
 
 let socket: Socket | null = null
@@ -42,14 +47,24 @@ export default function PlayerPage() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [canVote, setCanVote] = useState(false)
   const [canDecide, setCanDecide] = useState(false)
+  const [canResolveSwap, setCanResolveSwap] = useState(false)
   const [voteCandidates, setVoteCandidates] = useState<Array<{ id: string; name: string }>>([])
   const [decisionCandidates, setDecisionCandidates] = useState<Array<{ id: string; name: string }>>([])
+  const [decisionBarredCandidates, setDecisionBarredCandidates] = useState<Array<{ id: string; name: string }>>([])
   const [requiredVotes, setRequiredVotes] = useState(0)
   const [canStartGame, setCanStartGame] = useState(false)
   const [connectedPlayers, setConnectedPlayers] = useState(0)
   const [startBlockedReason, setStartBlockedReason] = useState<string | undefined>(undefined)
   const [showLeaveGamePopover, setShowLeaveGamePopover] = useState(false)
   const [showSkipRulesPopover, setShowSkipRulesPopover] = useState(false)
+  const [activeCode, setActiveCode] = useState<{ code: string; type: 'immunity' | 'requalify' } | null>(null)
+  const [redeemCodeError, setRedeemCodeError] = useState<string | null>(null)
+  const [isRedeemingCode, setIsRedeemingCode] = useState(false)
+  const [redeemCodeMessage, setRedeemCodeMessage] = useState<string | null>(null)
+  const [swapWindowCandidates, setSwapWindowCandidates] = useState<Array<{ id: string; name: string }>>([])
+  const [swapWindowDeadline, setSwapWindowDeadline] = useState<number>(0)
+  const [swapError, setSwapError] = useState<string | null>(null)
+  const [isSubmittingSwap, setIsSubmittingSwap] = useState(false)
 
   const applyProjection = (projection: PlayerProjection) => {
     setGameStatus(projection.status)
@@ -58,11 +73,17 @@ export default function PlayerPage() {
 
     setCanVote(projection.actions.canVote)
     setCanDecide(projection.actions.canDecide)
+    setCanResolveSwap(projection.actions.canResolveSwap)
 
     setVoteCandidates(projection.vote?.candidates ?? [])
     setRequiredVotes(projection.vote?.requiredVotes ?? 0)
 
     setDecisionCandidates(projection.decision?.candidates ?? [])
+    setDecisionBarredCandidates(projection.decision?.barredCandidates ?? [])
+
+    setActiveCode(projection.activeCode ?? null)
+    setSwapWindowCandidates(projection.swapWindow?.candidates ?? [])
+    setSwapWindowDeadline(projection.swapWindow?.deadline ?? 0)
 
     setIsAdmin(Boolean(projection.admin))
     setCanStartGame(Boolean(projection.admin?.canStartGame))
@@ -233,6 +254,19 @@ export default function PlayerPage() {
     }
   }, [gameStatus])
 
+  useEffect(() => {
+    if (gameStatus !== 'campaign') {
+      setRedeemCodeError(null)
+      setRedeemCodeMessage(null)
+    }
+  }, [gameStatus])
+
+  useEffect(() => {
+    if (!canResolveSwap) {
+      setSwapError(null)
+    }
+  }, [canResolveSwap])
+
   const handleSubmitVote = async (votes: string[]) => {
     if (!gameCode || !sessionData?.playerId) return
 
@@ -259,6 +293,36 @@ export default function PlayerPage() {
       setDecisionError(message)
     } finally {
       setIsSubmittingDecision(false)
+    }
+  }
+
+  const handleRedeemCode = async (submittedCode: string) => {
+    if (!gameCode || !sessionData?.playerId) return
+    setIsRedeemingCode(true)
+    setRedeemCodeError(null)
+    setRedeemCodeMessage(null)
+    try {
+      const result = await redeemCode(gameCode, sessionData.playerId, submittedCode)
+      setRedeemCodeMessage(result?.message ?? 'Code accepted.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to redeem code'
+      setRedeemCodeError(message)
+    } finally {
+      setIsRedeemingCode(false)
+    }
+  }
+
+  const handleSubmitSwap = async (targetId: string) => {
+    if (!gameCode || !sessionData?.playerId) return
+    setIsSubmittingSwap(true)
+    setSwapError(null)
+    try {
+      await submitSwapChoice(gameCode, sessionData.playerId, targetId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to submit swap choice'
+      setSwapError(message)
+    } finally {
+      setIsSubmittingSwap(false)
     }
   }
 
@@ -377,8 +441,17 @@ export default function PlayerPage() {
           <LeaderDecisionPanel
             decisionError={decisionError}
             decisionCandidates={decisionCandidates}
+            decisionBarredCandidates={decisionBarredCandidates}
             isSubmittingDecision={isSubmittingDecision}
             onSubmitFinalDecision={handleSubmitDecision}
+          />
+        ) : canResolveSwap && swapWindowDeadline > 0 ? (
+          <SwapWindowPanel
+            candidates={swapWindowCandidates}
+            deadline={swapWindowDeadline}
+            isSubmitting={isSubmittingSwap}
+            error={swapError}
+            onSubmit={handleSubmitSwap}
           />
         ) : (
           <div
@@ -419,6 +492,25 @@ export default function PlayerPage() {
                   Skip Rules
                 </ButtonLiquid>
               </div>
+            )}
+
+            {gameStatus === 'campaign' && (
+              activeCode ? (
+                <ActiveCodeDisplay code={activeCode.code} />
+              ) : (
+                <>
+                  <CodeRedeemPanel
+                    onSubmit={handleRedeemCode}
+                    isSubmitting={isRedeemingCode}
+                    error={redeemCodeError}
+                  />
+                  {redeemCodeMessage && (
+                    <p style={{ color: '#5A5A5A', fontSize: '0.85em', marginTop: 8, textAlign: 'center' }}>
+                      {redeemCodeMessage}
+                    </p>
+                  )}
+                </>
+              )
             )}
           </div>
         )}

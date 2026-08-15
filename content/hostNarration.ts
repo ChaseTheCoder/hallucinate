@@ -1,8 +1,8 @@
 import {
   gameContent,
-  barAnotherAnnouncementExtension,
-  selfImmunityAnnouncementExtension,
-  grantImmunityAnnouncementExtension,
+  immunityCodeAnnouncementExtension,
+  requalifyCodeAnnouncementExtension,
+  barredSwapAnnouncementExtension,
 } from './content'
 import audioManifestData from './audioManifest.json'
 import { ExecutiveDecisionType, StatusTypes } from '../types/types'
@@ -112,9 +112,9 @@ export function getAudioUrlForText(text: string): string | null {
 }
 
 function getExecutiveDecisionAnnouncementExtension(executiveDecision?: ExecutiveDecisionType): unknown[] {
-  if (executiveDecision === 'bar_another') return barAnotherAnnouncementExtension
-  if (executiveDecision === 'self_immunity_next_cycle') return selfImmunityAnnouncementExtension
-  if (executiveDecision === 'grant_immunity_next_cycle') return grantImmunityAnnouncementExtension
+  if (executiveDecision === 'immunity_code') return immunityCodeAnnouncementExtension
+  if (executiveDecision === 'requalify_code') return requalifyCodeAnnouncementExtension
+  if (executiveDecision === 'barred_swap_chance') return barredSwapAnnouncementExtension
   return []
 }
 

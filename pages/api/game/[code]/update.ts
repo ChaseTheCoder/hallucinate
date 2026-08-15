@@ -53,6 +53,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         newStatus = 'campaign'
       } else if (currentStatus === 'campaign') {
         newStatus = 'vote'
+        // A code's "valid only for the next campaign cycle" window ends here, whether it
+        // was redeemed or not — see ActiveRoundCode in types/types.ts.
+        delete game.activeCode
       } else if (currentStatus === 'vote') {
         if (qualifiedPlayerCount === 2) {
           newStatus = 'final' // Final announcement after final vote
@@ -69,9 +72,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           p.hasVoted = false
         })
         game.currentRound += 1
-        // Clear executive decision fields so the next round starts clean
+        // Clear executive decision fields so the next round starts clean. NOTE: activeCode
+        // is deliberately NOT cleared here — it becomes redeemable during the very campaign
+        // phase this transition starts; it's cleared at campaign -> vote instead (above).
         delete game.executiveDecision
-        delete game.executiveDecisionTargetId
+        delete game.swapWindow
       }
     }
 

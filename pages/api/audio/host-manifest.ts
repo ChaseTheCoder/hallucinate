@@ -18,7 +18,7 @@ function isStatus(value: string): value is StatusTypes {
 }
 
 function isExecutiveDecision(value: string): value is ExecutiveDecisionType {
-  return value === 'bar_another' || value === 'self_immunity_next_cycle' || value === 'grant_immunity_next_cycle' || value === 'opt_out'
+  return value === 'immunity_code' || value === 'requalify_code' || value === 'barred_swap_chance' || value === 'opt_out'
 }
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {

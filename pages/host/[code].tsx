@@ -19,11 +19,9 @@ let socket: Socket | null = null
 const AUTO_TRANSITION_STATUSES: Game['status'][] = ['rules', 'results', 'announcement']
 
 // Timing for the 'intro' sequence, per spec: ~3s total for the 3 components to fade out
-// (1s each, sequential), a "slow" fade for text elements, and a 2s gap between each
-// narration clip for entry 0's title/noun/definition trio.
+// (1s each, sequential), and a "slow" fade for text elements.
 const INTRO_COMPONENT_FADE_MS = 1000
 const INTRO_TEXT_FADE_MS = 2000
-const INTRO_AUDIO_GAP_MS = 2000
 // Window over which the title's non-"lucin" letters fade away at random, each with its
 // own randomly-staggered start so they don't all disappear in lockstep.
 const INTRO_LETTER_SCRAMBLE_MS = 2000
@@ -65,14 +63,14 @@ export default function HostPage() {
   const [loserPoints, setLoserPoints] = useState<number>(0)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [latestBarredName, setLatestBarredName] = useState<string | null>(null)
-  const [secondBarredName, setSecondBarredName] = useState<string | null>(null)
-  const [grantedImmunityPlayerName, setGrantedImmunityPlayerName] = useState<string | null>(null)
+  const [swapCandidateName, setSwapCandidateName] = useState<string | null>(null)
+  const [swapResultText, setSwapResultText] = useState<string | null>(null)
+  const [swapCountdownSeconds, setSwapCountdownSeconds] = useState(0)
   const [displayedHostMessages, setDisplayedHostMessages] = useState<string[]>(['Loading...'])
   const [displayedMessageIndices, setDisplayedMessageIndices] = useState<number[]>([0])
   const [displayedIsHeading, setDisplayedIsHeading] = useState<boolean[]>([false])
   const [isLeaderRevealed, setIsLeaderRevealed] = useState(false)
   const [isBarredRevealed, setIsBarredRevealed] = useState(false)
-  const [isED1BarredRevealed, setIsED1BarredRevealed] = useState(false)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [audioRetryTick, setAudioRetryTick] = useState(0)
   const [audioAmplitude, setAudioAmplitude] = useState<number>(0)
@@ -88,6 +86,11 @@ export default function HostPage() {
   // status is flattened uniformly), so `content === gameContent[status]` can no longer be
   // used to detect "has content caught up to the current game status yet".
   const contentStatusRef = useRef<{ status: Game['status'] | undefined; executiveDecision: Game['executiveDecision'] | undefined } | null>(null)
+  // Guards for the barred_swap_chance pause: prevent re-firing 'activate'/'expire' calls on
+  // effect re-runs, and prevent scheduling more than one narration-advance once resolved.
+  const swapActivateCalledRef = useRef(false)
+  const swapExpireCalledRef = useRef(false)
+  const swapAdvancedRef = useRef(false)
 
   // 'intro' sequence state: nav/right/left fade out, music + definition card fade in,
   // narration plays, then a multi-step exit (definition, then noun, then title letters
@@ -300,21 +303,15 @@ export default function HostPage() {
       (game?.status === 'results' || game?.status === 'final') ? hasReachedLastMessage : true
     )
 
-    // isBarredRevealed fires when the FIRST barred name message is reached.
-    // For ED1, that is index (originalLength - 1); for standard announcement it is also the last message.
+    // isBarredRevealed fires when the FIRST (primary) barred name message is reached — this
+    // is unaffected by which executive decision (if any) the leader chose, since the base
+    // bar happens every round regardless.
     const originalAnnouncementLength = gameContent.announcement.hostMessage.length
     const hasReachedFirstBarredMessage = hasLoadedCurrentStatusContent
       && Array.isArray(content?.hostMessage)
       && messageIndex >= originalAnnouncementLength - 1
     setIsBarredRevealed(
       game?.status === 'announcement' && hasReachedFirstBarredMessage
-    )
-
-    // isED1BarredRevealed fires when the extended ED1 sequence reaches the second barred name.
-    setIsED1BarredRevealed(
-      game?.status === 'announcement'
-      && game?.executiveDecision === 'bar_another'
-      && hasReachedLastMessage
     )
   }, [game?.status, game?.executiveDecision, content?.hostMessage, messageIndex])
 
@@ -324,16 +321,17 @@ export default function HostPage() {
     const currentRoundBarredIds = game?.currentBarredPlayerIds ?? game?.rounds?.[game?.currentRound ?? 0]?.barred ?? []
     const isAnnouncementStatus = game?.status === 'announcement'
 
-    // Primary barred player: stays in qualified list until isBarredRevealed
+    // Primary barred player: stays in qualified list until isBarredRevealed. (The
+    // barred_swap_chance candidate needs no equivalent hiding — they were already publicly
+    // barred in a prior round; only WHICH one was picked, and the swap outcome, are gated,
+    // and both of those are driven directly by narration timing / swapWindow.status below,
+    // not by hiding them from these lists.)
     const primaryBarredId = game?.currentBarredPlayerIds?.[0] ?? null
-    // ED1 secondary barred player: stays in qualified list until isED1BarredRevealed
-    const ed1BarredId = game?.executiveDecision === 'bar_another' ? (game?.executiveDecisionTargetId ?? null) : null
 
     const isCurrentRoundBarredPlayer = (playerId: string) => currentRoundBarredIds.includes(playerId)
     const shouldHideAsBarred = (playerId: string): boolean => {
       if (!isAnnouncementStatus) return false
       if (playerId === primaryBarredId && !isBarredRevealed) return true
-      if (playerId === ed1BarredId && !isED1BarredRevealed) return true
       return false
     }
 
@@ -362,14 +360,23 @@ export default function HostPage() {
     const totalQualified = nextQualifiedPlayers.length
     const nextVoteProgress = game?.status === 'vote' ? `${votedCount}/${totalQualified}` : null
 
-    // Derive second barred name for ED1 announcement
-    const nextSecondBarred = ed1BarredId ? nextPlayers.find(p => p.id === ed1BarredId) : null
-    setSecondBarredName(nextSecondBarred?.name ?? null)
+    // Derive the barred_swap_chance candidate's name (revealed only once narration reaches
+    // the {SWAP_CANDIDATE_NAME} line — see formatHostMessage token replacement) and, once
+    // the 25s window resolves/expires, the outcome sentence for {SWAP_RESULT}.
+    const swapWindow = game?.swapWindow
+    const nextSwapCandidate = swapWindow ? nextPlayers.find(p => p.id === swapWindow.barredPlayerId) : null
+    setSwapCandidateName(nextSwapCandidate?.name ?? null)
 
-    // Derive immunity target name for ED3 announcement
-    const immunityTargetId = game?.executiveDecision === 'grant_immunity_next_cycle' ? (game?.executiveDecisionTargetId ?? null) : null
-    const nextImmunityTarget = immunityTargetId ? nextPlayers.find(p => p.id === immunityTargetId) : null
-    setGrantedImmunityPlayerName(nextImmunityTarget?.name ?? null)
+    if (swapWindow?.status === 'resolved' && swapWindow.resultQualifiedTargetId) {
+      const swappedInTarget = nextPlayers.find(p => p.id === swapWindow.resultQualifiedTargetId)
+      setSwapResultText(
+        `${nextSwapCandidate?.name ?? 'They'} is qualified again, and ${swappedInTarget?.name ?? 'their replacement'} has been barred instead.`
+      )
+    } else if (swapWindow?.status === 'expired') {
+      setSwapResultText(`${nextSwapCandidate?.name ?? 'They'} remains barred.`)
+    } else {
+      setSwapResultText(null)
+    }
 
     let nextTimeRemaining = ''
     if (game?.status === 'campaign' && remainingSeconds > 0) {
@@ -386,7 +393,7 @@ export default function HostPage() {
     setWinnerName(nextWinnerName)
     setWinnerPoints(nextWinnerPoints)
     setLoserPoints(nextLoserPoints)
-  }, [game, remainingSeconds, isBarredRevealed, isED1BarredRevealed])
+  }, [game, remainingSeconds, isBarredRevealed])
 
   useEffect(() => {
     setIsLoading(!game)
@@ -421,7 +428,8 @@ export default function HostPage() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [gameCode, isSubscribed])
 
-  // Update host messages based on game status; extend announcement for ED1.
+  // Update host messages based on game status; extend announcement for the leader's chosen
+  // executive decision (immunity_code / requalify_code / barred_swap_chance).
   useEffect(() => {
     if (game?.status) {
       const gameStatus = game.status as keyof typeof gameContent
@@ -431,23 +439,25 @@ export default function HostPage() {
     }
   }, [game?.status, game?.executiveDecision])
 
+  // True while the narration is sitting on the barred_swap_chance pause marker — this is
+  // the ONE case where the generic auto-advancing narration effect below must stand down
+  // entirely; the dedicated swap-window effects further down drive activation, the live
+  // countdown, and advancing past this index once the window resolves/expires.
+  const isAtSwapWindowMarker = Boolean(
+    game?.status === 'announcement'
+    && game?.executiveDecision === 'barred_swap_chance'
+    && Array.isArray(content?.hostMessage)
+    && messageIndex < content.hostMessage.length
+    && getHostMessageDisplayText(content.hostMessage[messageIndex] as HostMessageEntry) === '{SWAP_WINDOW}'
+  )
+
   // Play narration for each indexed host message and resolve after the segment delay.
   useEffect(() => {
     if (!game?.status || !Array.isArray(content?.hostMessage) || messageIndex >= content.hostMessage.length) return
+    if (isAtSwapWindowMarker) return
 
     const segment = getHostNarrationSegment(game.status, messageIndex, game.executiveDecision)
-    // For ED1 extended announcement messages (beyond original content.ts length),
-    // segment will be null — apply dramatic pause for the second-to-last and last messages.
-    let delayMs = segment?.pauseAfterMs ?? DEFAULT_HOST_PAUSE_MS
-    if (
-      game.status === 'announcement' &&
-      game.executiveDecision === 'bar_another' &&
-      !segment
-    ) {
-      const isLastMsg = messageIndex === content.hostMessage.length - 1
-      const isSecondToLastMsg = messageIndex === content.hostMessage.length - 2
-      if (isLastMsg || isSecondToLastMsg) delayMs = 8000
-    }
+    const delayMs = segment?.pauseAfterMs ?? DEFAULT_HOST_PAUSE_MS
     const isLastMessage = messageIndex >= content.hostMessage.length - 1
     const shouldAutoTransition = AUTO_TRANSITION_STATUSES.includes(game.status)
 
@@ -582,7 +592,7 @@ export default function HostPage() {
         narrationAudioRef.current = null
       }
     }
-  }, [game?.status, content?.hostMessage, messageIndex, audioRetryTick, handleTransition])
+  }, [game?.status, content?.hostMessage, messageIndex, audioRetryTick, handleTransition, isAtSwapWindowMarker])
 
   useEffect(() => {
     if (!autoplayBlocked) return
@@ -645,21 +655,27 @@ export default function HostPage() {
 
       const slice = hostMessageEntries.slice(startIndex, messageIndex + 1)
 
-      const messages = slice.map(entry =>
+      // {SWAP_WINDOW} is a structural pause marker (see barredSwapAnnouncementExtension in
+      // content/content.ts) — it's never displayed as text; the live countdown is rendered
+      // separately (see the swap-window overlay in the JSX below).
+      const sliceWithIndex = slice
+        .map((entry, i) => ({ entry, originalIndex: startIndex + i }))
+        .filter(({ entry }) => getHostMessageDisplayText(entry) !== '{SWAP_WINDOW}')
+
+      const messages = sliceWithIndex.map(({ entry }) =>
         getHostMessageDisplayText(entry)
           .replace('{LEADER_NAME}', leaderName || 'TBD')
           .replace('{PLAYER_NAME}', latestBarredName || 'TBD')
-          .replace('{ED1_PLAYER_NAME}', secondBarredName || 'TBD')
-          .replace('{PLAYER_GRANTED_IMMUNITY}', grantedImmunityPlayerName || 'TBD')
+          .replace('{SWAP_CANDIDATE_NAME}', swapCandidateName || 'TBD')
+          .replace('{SWAP_RESULT}', swapResultText || '')
           .replace('{TIME}', timeRemaining || 'TBD')
           .replace('{VOTE_PROGRESS}', voteProgress || '0/0')
           .replace('{WINNER_NAME}', winnerName)
           .replace('{WINNER_POINTS}', winnerPoints.toString())
           .replace('{LOSER_POINTS}', loserPoints.toString())
       )
-      const headingFlags = slice.map(entry => isHostMessageHeading(entry))
-      // Track original indices for each displayed message
-      const indices = Array.from({ length: messageIndex - startIndex + 1 }, (_, i) => startIndex + i)
+      const headingFlags = sliceWithIndex.map(({ entry }) => isHostMessageHeading(entry))
+      const indices = sliceWithIndex.map(({ originalIndex }) => originalIndex)
       setDisplayedHostMessages(messages)
       setDisplayedMessageIndices(indices)
       setDisplayedIsHeading(headingFlags)
@@ -672,7 +688,8 @@ export default function HostPage() {
     messageIndex,
     leaderName,
     latestBarredName,
-    grantedImmunityPlayerName,
+    swapCandidateName,
+    swapResultText,
     timeRemaining,
     voteProgress,
     winnerName,
@@ -711,6 +728,78 @@ export default function HostPage() {
 
     autoTransitionedStatusRef.current = null
   }, [game?.status])
+
+  // Reset the swap-window guards whenever narration moves off the pause marker (e.g. a new
+  // round with a fresh barred_swap_chance decision reaches it again).
+  useEffect(() => {
+    if (!isAtSwapWindowMarker) {
+      swapActivateCalledRef.current = false
+      swapExpireCalledRef.current = false
+      swapAdvancedRef.current = false
+      setSwapCountdownSeconds(0)
+    }
+  }, [isAtSwapWindowMarker])
+
+  // The instant narration reaches the pause marker, tell the server to open the 25s window
+  // (idempotent — see pages/api/game/[code]/swap.ts). This is what makes the countdown
+  // (and the barred player's picker, via their own player projection) real-time.
+  useEffect(() => {
+    if (!isAtSwapWindowMarker || !gameCode) return
+    if (!game?.swapWindow || game.swapWindow.status !== 'pending') return
+    if (swapActivateCalledRef.current) return
+    swapActivateCalledRef.current = true
+
+    fetch(`/api/game/${gameCode}/swap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'activate' }),
+    }).catch(err => console.error('Failed to activate swap window:', err))
+  }, [isAtSwapWindowMarker, game?.swapWindow?.status, gameCode])
+
+  // Live countdown display, driven by the server-set deadline (not a local 25s timer) —
+  // and once local time is up, tell the server to expire the window. 'resolve' independently
+  // re-validates the deadline server-side, so this call is a formality that keeps the
+  // announcement moving, not the actual enforcement.
+  useEffect(() => {
+    const deadline = game?.swapWindow?.deadline
+    if (!isAtSwapWindowMarker || game?.swapWindow?.status !== 'active' || !deadline || !gameCode) {
+      setSwapCountdownSeconds(0)
+      return
+    }
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+      setSwapCountdownSeconds(remaining)
+      if (remaining <= 0 && !swapExpireCalledRef.current) {
+        swapExpireCalledRef.current = true
+        fetch(`/api/game/${gameCode}/swap`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'expire' }),
+        }).catch(err => console.error('Failed to expire swap window:', err))
+      }
+    }
+
+    tick()
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [isAtSwapWindowMarker, game?.swapWindow?.status, game?.swapWindow?.deadline, gameCode])
+
+  // Once the window resolves (early submission) or expires (timeout), continue the
+  // announcement narration to the {SWAP_RESULT} line — a short buffer lets the live
+  // qualified/barred lists (which already reflect the real mutation, applied server-side
+  // the instant it happened) settle before the narration text catches up.
+  useEffect(() => {
+    const status = game?.swapWindow?.status
+    if (!isAtSwapWindowMarker || (status !== 'resolved' && status !== 'expired')) return
+    if (swapAdvancedRef.current) return
+    swapAdvancedRef.current = true
+
+    const timeout = setTimeout(() => {
+      setMessageIndex(prev => prev + 1)
+    }, 1500)
+    return () => clearTimeout(timeout)
+  }, [isAtSwapWindowMarker, game?.swapWindow?.status])
 
   // 'intro' sequence, run once per entry into the status. Fully self-contained — doesn't
   // touch the generic messageIndex/narration state machine used by every other status.
@@ -774,7 +863,7 @@ export default function HostPage() {
       await wait(INTRO_TEXT_FADE_MS)
       if (isCancelled) return
 
-      // 4. Play title, noun, definition audio in order — 2s gap between each (not after the last).
+      // 4. Play title, noun, definition audio in order, back to back.
       const entryZeroClips = [entryZero?.audio, nounEntry?.audio, definitionEntry?.audio]
         .filter((text): text is string => Boolean(text))
       for (let i = 0; i < entryZeroClips.length; i++) {
@@ -782,8 +871,6 @@ export default function HostPage() {
         const audioUrl = getAudioUrlForText(entryZeroClips[i])
         if (audioUrl) await playClip(audioUrl)
         if (isCancelled) return
-        const isLast = i === entryZeroClips.length - 1
-        if (!isLast) await wait(INTRO_AUDIO_GAP_MS)
       }
       if (isCancelled) return
 
@@ -1061,8 +1148,8 @@ export default function HostPage() {
                   {formatHostMessage(message, {
                     leaderName,
                     latestBarredName,
-                    secondBarredName,
-                    grantedImmunityPlayerName,
+                    swapCandidateName,
+                    swapResultText,
                     timeRemaining,
                     voteProgress,
                     winnerName,
@@ -1072,6 +1159,11 @@ export default function HostPage() {
                 </Text>
               )
             })}
+            {isAtSwapWindowMarker && game?.swapWindow?.status === 'active' && (
+              <Text size={1.75} color='text-primary' bold style={{ marginBottom: '0.5rem' }}>
+                {swapCandidateName || 'They'} is deciding... {swapCountdownSeconds}s
+              </Text>
+            )}
             {loadError ? (
               <p style={{ textAlign: 'center', color: '#E03E3E', marginTop: 12 }}>
                 Please refresh or check the game code.

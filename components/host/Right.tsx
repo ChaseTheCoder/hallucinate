@@ -182,9 +182,8 @@ export default function Right({
 		<div style={{
 			display: 'flex',
 			flexDirection: 'column',
-			flex: 4,
 			gap: 12,
-			width: '30%',
+			width: '100%',
 			height: '100%'
 		}}>
             <Text color='text-primary' size={1} allCaps bold>

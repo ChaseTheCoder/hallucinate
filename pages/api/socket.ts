@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import { Server as HTTPServer } from 'http'
 import { Socket as NetSocket } from 'net'
 import { Server as IOServer } from 'socket.io'
-import { buildPlayerProjection, emitRoleBasedGameUpdates, enrichGame, findGameByCode, persistGame } from '../../server/gameStore'
+import { buildPlayerProjection, emitRoleBasedGameUpdates, enrichGame, findGameByCode, persistGame, sanitizeGameForHost } from '../../server/gameStore'
 
 interface SocketServer extends HTTPServer {
   io?: IOServer | undefined
@@ -42,8 +42,9 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
         socket.join(`host-game-${code}`)
         socket.join(`game-${code}`)
         
-        // Send enriched game state with computed fields
-        socket.emit('game-state-update', enrichGame(game))
+        // Send enriched game state with computed fields (host payload — never include
+        // raw executive-decision code text, see sanitizeGameForHost)
+        socket.emit('game-state-update', sanitizeGameForHost(enrichGame(game)))
       })
 
       // Player connection tracking - separate from data broadcasting

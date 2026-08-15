@@ -217,10 +217,30 @@ export function enrichGame(game: Game): Game {
   }
 }
 
+/**
+ * The host's shared screen is visible to every player in the room, so the raw
+ * immunity_code/requalify_code text must never reach it — only the code's owner (via
+ * buildPlayerProjection) is allowed to see it. Call this on any enriched game object
+ * before emitting/returning it as a host payload.
+ */
+export function sanitizeGameForHost(game: Game): Game {
+  if (!game.activeCode) return game
+  return {
+    ...game,
+    activeCode: { ...game.activeCode, code: '' },
+  }
+}
+
 export function buildPlayerProjection(game: Game, player: Player): PlayerProjection {
   const qualifiedPlayers = game.players.filter(p => p.isQualified)
   const canVote = game.status === 'vote' && !player.hasVoted
   const canDecide = game.status === 'decision' && player.leader
+  const canResolveSwap = Boolean(
+    game.status === 'announcement'
+    && game.swapWindow
+    && game.swapWindow.status === 'active'
+    && game.swapWindow.barredPlayerId === player.id
+  )
 
   const projection: PlayerProjection = {
     code: game.code,
@@ -234,6 +254,7 @@ export function buildPlayerProjection(game: Game, player: Player): PlayerProject
     actions: {
       canVote,
       canDecide,
+      canResolveSwap,
     },
   }
 
@@ -251,6 +272,39 @@ export function buildPlayerProjection(game: Game, player: Player): PlayerProject
         .filter(p => !p.leader)
         .filter(p => p.immuneFromBarInRound !== game.currentRound)
         .map(p => ({ id: p.id, name: p.name })),
+      // Pre-existing barred players only — the bar this round's leader is about to confirm
+      // hasn't been applied yet at decision-submit time, so it can't appear here.
+      barredCandidates: game.players
+        .filter(p => !p.isQualified)
+        .map(p => ({ id: p.id, name: p.name })),
+    }
+  }
+
+  // Scoped strictly to the code's owner, and only while it's redeemable this cycle —
+  // never sent to the host or to any other player.
+  if (
+    game.status === 'campaign'
+    && game.activeCode
+    && game.activeCode.ownerId === player.id
+    && game.activeCode.validForRound === game.currentRound
+  ) {
+    projection.activeCode = {
+      code: game.activeCode.code,
+      type: game.activeCode.type,
+    }
+  }
+
+  // Scoped strictly to the barred player currently holding the swap chance — never sent
+  // to the host or to any other player (including the leader who picked them).
+  if (canResolveSwap && game.swapWindow?.deadline) {
+    const eligibleTargets = game.players.filter(p =>
+      p.isQualified
+      && !p.leader
+      && p.immuneFromBarInRound !== game.currentRound
+    )
+    projection.swapWindow = {
+      deadline: game.swapWindow.deadline,
+      candidates: eligibleTargets.map(p => ({ id: p.id, name: p.name })),
     }
   }
 
@@ -272,7 +326,7 @@ export function buildPlayerProjection(game: Game, player: Player): PlayerProject
 export function emitRoleBasedGameUpdates(io: SocketIOServer, game: Game): void {
   const enriched = enrichGame(game)
 
-  io.to(`host-game-${game.code}`).emit('game-state-update', enriched)
+  io.to(`host-game-${game.code}`).emit('game-state-update', sanitizeGameForHost(enriched))
 
   game.players.forEach(player => {
     io.to(`player-${game.code}-${player.name}`).emit('player-projection-update', buildPlayerProjection(enriched, player))

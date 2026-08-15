@@ -1,5 +1,5 @@
 import type { Game } from '../../types/types'
-import { gameContent, barAnotherAnnouncementExtension, selfImmunityAnnouncementExtension, grantImmunityAnnouncementExtension } from '../../content/content'
+import { gameContent, immunityCodeAnnouncementExtension, requalifyCodeAnnouncementExtension, barredSwapAnnouncementExtension } from '../../content/content'
 import { getHostNarrationSegment, flattenHostMessages } from '../../content/hostNarration'
 
 const SUPPORTED_STATUS_MUSIC = new Set<Game['status']>(['join', 'intro', 'rules', 'campaign', 'vote', 'results', 'decision', 'announcement', 'final'])
@@ -30,9 +30,9 @@ export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], 
 	const rawEntries: unknown[] = [...baseEntries]
 
 	if (gameStatus === 'announcement') {
-		if (executiveDecision === 'bar_another') rawEntries.push(...barAnotherAnnouncementExtension)
-		else if (executiveDecision === 'self_immunity_next_cycle') rawEntries.push(...selfImmunityAnnouncementExtension)
-		else if (executiveDecision === 'grant_immunity_next_cycle') rawEntries.push(...grantImmunityAnnouncementExtension)
+		if (executiveDecision === 'immunity_code') rawEntries.push(...immunityCodeAnnouncementExtension)
+		else if (executiveDecision === 'requalify_code') rawEntries.push(...requalifyCodeAnnouncementExtension)
+		else if (executiveDecision === 'barred_swap_chance') rawEntries.push(...barredSwapAnnouncementExtension)
 	}
 
 	return { ...baseContent, hostMessage: flattenHostMessages(rawEntries) }
@@ -43,8 +43,8 @@ export function formatHostMessage(
 	tokens: {
 		leaderName?: string | null
 		latestBarredName?: string | null
-		secondBarredName?: string | null
-		grantedImmunityPlayerName?: string | null
+		swapCandidateName?: string | null
+		swapResultText?: string | null
 		timeRemaining?: string | null
 		voteProgress?: string | null
 		winnerName?: string | null
@@ -55,8 +55,9 @@ export function formatHostMessage(
 	return message
 		.replace('{LEADER_NAME}', tokens.leaderName || 'TBD')
 		.replace('{PLAYER_NAME}', tokens.latestBarredName || 'TBD')
-		.replace('{ED1_PLAYER_NAME}', tokens.secondBarredName || 'TBD')
-		.replace('{PLAYER_GRANTED_IMMUNITY}', tokens.grantedImmunityPlayerName || 'TBD')
+		.replace('{SWAP_CANDIDATE_NAME}', tokens.swapCandidateName || 'TBD')
+		.replace('{SWAP_WINDOW}', '')
+		.replace('{SWAP_RESULT}', tokens.swapResultText || '')
 		.replace('{TIME}', tokens.timeRemaining || 'TBD')
 		.replace('{VOTE_PROGRESS}', tokens.voteProgress || '0/0')
 		.replace('{WINNER_NAME}', tokens.winnerName || 'TBD')

@@ -1,0 +1,16 @@
+const submitSwapChoice = async (gameCode: string, playerId: string, targetId: string) => {
+  const res = await fetch(`/api/game/${gameCode}/swap`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'resolve', playerId, targetId })
+  })
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.error || 'Failed to submit swap choice')
+  }
+
+  return res.json()
+}
+
+export default submitSwapChoice
