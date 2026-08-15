@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import io, { Socket } from 'socket.io-client'
 import ButtonLiquid from '../../components/ButtonLiquid'
@@ -8,15 +8,20 @@ import LeaderDecisionPanel from '../../components/player/LeaderDecisionPanel'
 import CodeRedeemPanel from '../../components/player/CodeRedeemPanel'
 import ActiveCodeDisplay from '../../components/player/ActiveCodeDisplay'
 import SwapWindowPanel from '../../components/player/SwapWindowPanel'
+import BottomNav, { PlayerTabId } from '../../components/player/BottomNav'
+import InfluencePopover from '../../components/player/InfluencePopover'
+import PostComposer from '../../components/player/PostComposer'
 import Popover from '../../components/Popover'
 import { gameContent } from '../../content/content'
-import { ExecutiveDecisionType, PhaseTypes, PlayerProjection, StatusTypes } from '../../types/types'
+import { ActiveCodeType, BarredInfluenceType, ExecutiveDecisionType, PhaseTypes, PlayerProjection, StatusTypes } from '../../types/types'
 import { PHASE_DISPLAY_NAMES } from '../../config/phases'
 import { submitVote } from '../../utils/player/submitVote'
 import { leaveGame } from '../../utils/player/leaveGame'
 import submitDecision from '../../utils/player/submitDecision'
 import redeemCode from '../../utils/player/redeemCode'
 import submitSwapChoice from '../../utils/player/submitSwapChoice'
+import acknowledgeInfluence from '../../utils/player/acknowledgeInfluence'
+import { setPostAlias, submitPost } from '../../utils/player/submitPost'
 import updateGame from '../../utils/updateGame'
 
 let socket: Socket | null = null
@@ -57,7 +62,7 @@ export default function PlayerPage() {
   const [startBlockedReason, setStartBlockedReason] = useState<string | undefined>(undefined)
   const [showLeaveGamePopover, setShowLeaveGamePopover] = useState(false)
   const [showSkipRulesPopover, setShowSkipRulesPopover] = useState(false)
-  const [activeCode, setActiveCode] = useState<{ code: string; type: 'immunity' | 'requalify' } | null>(null)
+  const [activeCode, setActiveCode] = useState<{ code: string; type: ActiveCodeType } | null>(null)
   const [redeemCodeError, setRedeemCodeError] = useState<string | null>(null)
   const [isRedeemingCode, setIsRedeemingCode] = useState(false)
   const [redeemCodeMessage, setRedeemCodeMessage] = useState<string | null>(null)
@@ -65,6 +70,22 @@ export default function PlayerPage() {
   const [swapWindowDeadline, setSwapWindowDeadline] = useState<number>(0)
   const [swapError, setSwapError] = useState<string | null>(null)
   const [isSubmittingSwap, setIsSubmittingSwap] = useState(false)
+  const [activeTab, setActiveTab] = useState<PlayerTabId>('home')
+  const [playerInfluence, setPlayerInfluence] = useState<{ type: BarredInfluenceType; acknowledged: boolean } | null>(null)
+  // Once the influence popover is allowed to show for the *current* influence (see the
+  // gameStatus === 'campaign' gate below), it must stay visible through any later status
+  // change until acknowledged — e.g. a leader barred mid-campaign by a code sees the popover
+  // immediately, and it must not vanish just because the game moves on to 'vote' before they
+  // click "I Understand". Latched separately from playerInfluence.acknowledged so a brand new
+  // influence (different type) re-applies the campaign-only gate fresh.
+  const [influencePopoverUnlocked, setInfluencePopoverUnlocked] = useState(false)
+  const latchedInfluenceTypeRef = useRef<BarredInfluenceType | null>(null)
+  const [isAcknowledgingInfluence, setIsAcknowledgingInfluence] = useState(false)
+  const [postInfo, setPostInfo] = useState<{ alias?: string; hasPostedThisCycle: boolean } | null>(null)
+  const [isSettingAlias, setIsSettingAlias] = useState(false)
+  const [isSubmittingPost, setIsSubmittingPost] = useState(false)
+  const [postError, setPostError] = useState<string | null>(null)
+  const [qualifiedCount, setQualifiedCount] = useState<number>(0)
 
   const applyProjection = (projection: PlayerProjection) => {
     setGameStatus(projection.status)
@@ -84,6 +105,10 @@ export default function PlayerPage() {
     setActiveCode(projection.activeCode ?? null)
     setSwapWindowCandidates(projection.swapWindow?.candidates ?? [])
     setSwapWindowDeadline(projection.swapWindow?.deadline ?? 0)
+
+    setPlayerInfluence(projection.influence ?? null)
+    setPostInfo(projection.post ?? null)
+    setQualifiedCount(projection.qualifiedCount ?? 0)
 
     setIsAdmin(Boolean(projection.admin))
     setCanStartGame(Boolean(projection.admin?.canStartGame))
@@ -267,6 +292,38 @@ export default function PlayerPage() {
     }
   }, [canResolveSwap])
 
+  // Reset the latch whenever the influence itself changes (a fresh bar, or losing the old one
+  // on requalify) so the campaign-only gate is re-applied for the new influence rather than
+  // inheriting an already-unlocked popover from a prior one.
+  useEffect(() => {
+    if (playerInfluence?.type !== latchedInfluenceTypeRef.current) {
+      latchedInfluenceTypeRef.current = playerInfluence?.type ?? null
+      setInfluencePopoverUnlocked(false)
+    }
+  }, [playerInfluence?.type])
+
+  // Once unacknowledged influence exists during a Campaign phase, permanently unlock the
+  // popover for this influence — it then stays visible through any later status change
+  // (vote/decision/announcement/etc.) until acknowledged, instead of disappearing the moment
+  // gameStatus stops being 'campaign'.
+  useEffect(() => {
+    if (playerInfluence && !playerInfluence.acknowledged && gameStatus === 'campaign') {
+      setInfluencePopoverUnlocked(true)
+    }
+  }, [playerInfluence, gameStatus])
+
+  // If the Code/Post tab becomes disabled out from under the player (e.g. campaign phase
+  // ends while they're on the Code tab), fall back to Home rather than stranding them on a
+  // now-disabled tab.
+  useEffect(() => {
+    if (activeTab === 'code' && gameStatus !== 'campaign') {
+      setActiveTab('home')
+    }
+    if (activeTab === 'post' && playerInfluence?.type !== 'post') {
+      setActiveTab('home')
+    }
+  }, [activeTab, gameStatus, playerInfluence])
+
   const handleSubmitVote = async (votes: string[]) => {
     if (!gameCode || !sessionData?.playerId) return
 
@@ -323,6 +380,47 @@ export default function PlayerPage() {
       setSwapError(message)
     } finally {
       setIsSubmittingSwap(false)
+    }
+  }
+
+  const handleAcknowledgeInfluence = async () => {
+    if (!gameCode || !sessionData?.playerId) return
+    setIsAcknowledgingInfluence(true)
+    try {
+      await acknowledgeInfluence(gameCode, sessionData.playerId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to dismiss'
+      alert(message)
+    } finally {
+      setIsAcknowledgingInfluence(false)
+    }
+  }
+
+  const handleConfirmAlias = async (alias: string) => {
+    if (!gameCode || !sessionData?.playerId) return
+    setIsSettingAlias(true)
+    setPostError(null)
+    try {
+      await setPostAlias(gameCode, sessionData.playerId, alias)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to confirm name'
+      setPostError(message)
+    } finally {
+      setIsSettingAlias(false)
+    }
+  }
+
+  const handleSubmitPost = async (text: string) => {
+    if (!gameCode || !sessionData?.playerId) return
+    setIsSubmittingPost(true)
+    setPostError(null)
+    try {
+      await submitPost(gameCode, sessionData.playerId, text)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to submit post'
+      setPostError(message)
+    } finally {
+      setIsSubmittingPost(false)
     }
   }
 
@@ -388,13 +486,26 @@ export default function PlayerPage() {
     )
   }
 
+  const postTabEnabled = playerInfluence?.type === 'post'
+  const codeTabEnabled = gameStatus === 'campaign'
+  // Mirrors the server-side rule in pages/api/game/[code]/redeem-code.ts: no code type is
+  // redeemable once 3 or fewer qualified players remain.
+  const codesLocked = qualifiedCount <= 4
+  // Gated to Campaign so a player's barred/influence reveal never shows up before the host's
+  // announcement narration has finished — but once unlocked (see influencePopoverUnlocked
+  // effects above) it stays sticky through any later status change, including across
+  // reconnects, until acknowledged. It does NOT re-hide just because gameStatus later moves
+  // past Campaign.
+  const showInfluencePopover = Boolean(playerInfluence && !playerInfluence.acknowledged && influencePopoverUnlocked)
+
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
         minHeight: '100vh',
-        gap: 12
+        gap: 12,
+        paddingBottom: 88
       }}
     >
       {connectionStatus !== 'connected' && (
@@ -420,7 +531,6 @@ export default function PlayerPage() {
       <PlayerHeader
         playerName={sessionData?.playerName || playerName}
         isAdmin={isAdmin}
-        onLeaveGame={handleLeaveGameClick}
       />
 
       <div
@@ -430,91 +540,141 @@ export default function PlayerPage() {
           flex: 1
         }}
       >
-        {canVote && voteCandidates.length > 0 ? (
-          <VotePanel
-            candidates={voteCandidates}
-            requiredVotes={requiredVotes}
-            onVoteSubmit={handleSubmitVote}
-            isSubmitting={isSubmittingVote}
-          />
-        ) : canDecide ? (
-          <LeaderDecisionPanel
-            decisionError={decisionError}
-            decisionCandidates={decisionCandidates}
-            decisionBarredCandidates={decisionBarredCandidates}
-            isSubmittingDecision={isSubmittingDecision}
-            onSubmitFinalDecision={handleSubmitDecision}
-          />
-        ) : canResolveSwap && swapWindowDeadline > 0 ? (
-          <SwapWindowPanel
-            candidates={swapWindowCandidates}
-            deadline={swapWindowDeadline}
-            isSubmitting={isSubmittingSwap}
-            error={swapError}
-            onSubmit={handleSubmitSwap}
-          />
-        ) : (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flex: 1
-            }}
-          >
-            {gamePhase && (
-              <p style={{ color: '#9A9A9A', textAlign: 'center', margin: '0 0 4px', fontSize: '0.75em', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                {PHASE_DISPLAY_NAMES[gamePhase]}
+        {activeTab === 'home' && (
+          canVote && voteCandidates.length > 0 ? (
+            <VotePanel
+              candidates={voteCandidates}
+              requiredVotes={requiredVotes}
+              onVoteSubmit={handleSubmitVote}
+              isSubmitting={isSubmittingVote}
+            />
+          ) : canDecide ? (
+            <LeaderDecisionPanel
+              decisionError={decisionError}
+              decisionCandidates={decisionCandidates}
+              decisionBarredCandidates={decisionBarredCandidates}
+              isSubmittingDecision={isSubmittingDecision}
+              onSubmitFinalDecision={handleSubmitDecision}
+            />
+          ) : canResolveSwap && swapWindowDeadline > 0 ? (
+            <SwapWindowPanel
+              candidates={swapWindowCandidates}
+              deadline={swapWindowDeadline}
+              isSubmitting={isSubmittingSwap}
+              error={swapError}
+              onSubmit={handleSubmitSwap}
+            />
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: 1
+              }}
+            >
+              {gamePhase && (
+                <p style={{ color: '#9A9A9A', textAlign: 'center', margin: '0 0 4px', fontSize: '0.75em', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                  {PHASE_DISPLAY_NAMES[gamePhase]}
+                </p>
+              )}
+              <p style={{ color: '#5A5A5A', textAlign: 'center', margin: 0 }}>
+                {playerMessage || 'Waiting...'}
               </p>
-            )}
-            <p style={{ color: '#5A5A5A', textAlign: 'center', margin: 0 }}>
-              {playerMessage || 'Waiting...'}
-            </p>
-            {isAdmin && gameStatus === 'join' && (
-              <ButtonLiquid
-                onClick={handleStartGameClick}
-                disabled={!canStartGame}
-                style={{ marginTop: 12 }}
-              >
-                Start Game
-              </ButtonLiquid>
-            )}
-            {isAdmin && gameStatus === 'join' && !canStartGame && startBlockedReason && (
-              <p style={{ color: '#888', fontSize: '0.9em', marginTop: 8, textAlign: 'center' }}>
-                {startBlockedReason}
-              </p>
-            )}
-
-            {isAdmin && gameStatus === 'rules' && (
-              <div style={{ marginTop: 16 }}>
-                <ButtonLiquid onClick={handleSkipRulesClick}>
-                  Skip Rules
+              {isAdmin && gameStatus === 'join' && (
+                <ButtonLiquid
+                  onClick={handleStartGameClick}
+                  disabled={!canStartGame}
+                  style={{ marginTop: 12 }}
+                >
+                  Start Game
                 </ButtonLiquid>
-              </div>
-            )}
+              )}
+              {isAdmin && gameStatus === 'join' && !canStartGame && startBlockedReason && (
+                <p style={{ color: '#888', fontSize: '0.9em', marginTop: 8, textAlign: 'center' }}>
+                  {startBlockedReason}
+                </p>
+              )}
 
-            {gameStatus === 'campaign' && (
-              activeCode ? (
-                <ActiveCodeDisplay code={activeCode.code} />
-              ) : (
-                <>
-                  <CodeRedeemPanel
-                    onSubmit={handleRedeemCode}
-                    isSubmitting={isRedeemingCode}
-                    error={redeemCodeError}
-                  />
-                  {redeemCodeMessage && (
-                    <p style={{ color: '#5A5A5A', fontSize: '0.85em', marginTop: 8, textAlign: 'center' }}>
-                      {redeemCodeMessage}
-                    </p>
-                  )}
-                </>
-              )
+              {isAdmin && gameStatus === 'rules' && (
+                <div style={{ marginTop: 16 }}>
+                  <ButtonLiquid onClick={handleSkipRulesClick}>
+                    Skip Rules
+                  </ButtonLiquid>
+                </div>
+              )}
+            </div>
+          )
+        )}
+
+        {activeTab === 'post' && postTabEnabled && (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <PostComposer
+              alias={postInfo?.alias}
+              hasPostedThisCycle={Boolean(postInfo?.hasPostedThisCycle)}
+              isCampaign={gameStatus === 'campaign'}
+              onConfirmAlias={handleConfirmAlias}
+              onSubmitPost={handleSubmitPost}
+              isSubmittingAlias={isSettingAlias}
+              isSubmittingPost={isSubmittingPost}
+              error={postError}
+            />
+          </div>
+        )}
+
+        {activeTab === 'code' && codeTabEnabled && (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+            {/* Holding an active code and redeeming someone else's code are not mutually
+                exclusive (e.g. a barred player holding a grant-immunity code could also be
+                trying to redeem a leader-granted immunity code) — render both when applicable
+                rather than either/or. */}
+            {activeCode && <ActiveCodeDisplay code={activeCode.code} />}
+
+            {codesLocked ? (
+              <p style={{ color: '#999', fontSize: '0.85em', textAlign: 'center', margin: 0, fontStyle: 'italic' }}>
+                No codes are valid with 4 or fewer qualified players remaining.
+              </p>
+            ) : (
+              <>
+                <CodeRedeemPanel
+                  onSubmit={handleRedeemCode}
+                  isSubmitting={isRedeemingCode}
+                  error={redeemCodeError}
+                />
+                {redeemCodeMessage && (
+                  <p style={{ color: '#5A5A5A', fontSize: '0.85em', marginTop: 8, textAlign: 'center' }}>
+                    {redeemCodeMessage}
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
+
+        {activeTab === 'leave' && (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+            <p style={{ color: '#5A5A5A', textAlign: 'center', margin: 0 }}>
+              Ready to leave the game?
+            </p>
+            <ButtonLiquid onClick={handleLeaveGameClick}>Leave Game</ButtonLiquid>
+          </div>
+        )}
       </div>
+
+      <BottomNav
+        activeTab={activeTab}
+        onSelect={setActiveTab}
+        postEnabled={postTabEnabled}
+        codeEnabled={codeTabEnabled}
+      />
+
+      <InfluencePopover
+        isOpen={showInfluencePopover}
+        influenceType={playerInfluence?.type ?? null}
+        isSubmitting={isAcknowledgingInfluence}
+        onAcknowledge={handleAcknowledgeInfluence}
+      />
 
       <Popover
         isOpen={showLeaveGamePopover}

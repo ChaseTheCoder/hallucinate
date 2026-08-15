@@ -45,7 +45,7 @@ export default function SwapWindowPanel({ candidates, deadline, isSubmitting, er
       {expired ? (
         <p style={{ color: '#999', textAlign: 'center' }}>Time's up.</p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto', padding: '4px' }}>
           {candidates.map(player => (
             <VoteButton
               key={player.id}

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "generate-audio": "tsx scripts/generate-audio.ts"
+    "generate-audio": "tsx scripts/generate-audio.ts",
+    "sync-content-ids": "tsx scripts/sync-content-ids.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1107.0",

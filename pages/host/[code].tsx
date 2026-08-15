@@ -7,9 +7,17 @@ import Nav from '../../components/host/Nav'
 import Right from '../../components/host/Right'
 import Popover from '../../components/Popover'
 import ButtonLiquid from '../../components/ButtonLiquid'
+import CodeEventToast, { type CodeEventToastData } from '../../components/host/CodeEventToast'
+import PostFeed from '../../components/host/PostFeed'
 import { Game } from '../../types/types'
-import { gameContent, introductionAnnouncementExtension } from '../../content/content'
-import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment, getAudioUrlForText } from '../../content/hostNarration'
+import {
+  gameContent,
+  introductionAnnouncementExtension,
+  finalRoundCampaignIntro,
+  finalRoundCampaignCandidateA,
+  finalRoundCampaignCandidateB,
+} from '../../content/content'
+import { DEFAULT_HOST_PAUSE_MS, getHostNarrationSegment, getAudioUrlForText, isDynamicTokenLine } from '../../content/hostNarration'
 import updateGame from '../../utils/updateGame'
 import useStatusMusic from '../../utils/host/useStatusMusic'
 import { formatHostMessage, getExtendedAnnouncementHostMessages, shouldHostMessageBeBold } from '../../utils/host/utils'
@@ -19,9 +27,11 @@ let socket: Socket | null = null
 const AUTO_TRANSITION_STATUSES: Game['status'][] = ['rules', 'results', 'announcement']
 
 // Timing for the 'intro' sequence, per spec: ~3s total for the 3 components to fade out
-// (1s each, sequential), and a "slow" fade for text elements.
+// (1s each, sequential), a "slow" fade for text elements, and a 1.5s gap between each
+// narration clip for entry 0's title/noun/definition trio.
 const INTRO_COMPONENT_FADE_MS = 1000
 const INTRO_TEXT_FADE_MS = 2000
+const INTRO_AUDIO_GAP_MS = 1500
 // Window over which the title's non-"lucin" letters fade away at random, each with its
 // own randomly-staggered start so they don't all disappear in lockstep.
 const INTRO_LETTER_SCRAMBLE_MS = 2000
@@ -34,6 +44,22 @@ const INTRO_FINAL_PAUSE_MS = 5000
 // content.ts doesn't declare an explicit type for this export; entry 0 nests noun+definition
 // under `content` (same shape as rules' heading+content), the rest are flat {audio,display}.
 type IntroEntry = { audio: string; display: string; content?: { audio: string; display: string }[] }
+
+// Final round (exactly 2 qualified players remain) — see finalRoundCampaignIntro/
+// CandidateA/CandidateB in content/content.ts. This total/split MUST match the
+// FINAL_ROUND_CAMPAIGN_SECONDS enforced server-side in pages/api/game/[code]/update.ts,
+// which is the actual authority for when campaign -> vote fires; these are display-only
+// mirrors so the host page can derive its current step from elapsed time without a second
+// source of truth for "how long is this round".
+const FINAL_ROUND_CAMPAIGN_SECONDS = 120
+const FINAL_ROUND_CANDIDATE_SPLIT_SECONDS = 60
+// How long the "only two candidates remain..." intro block holds, gated by elapsed seconds
+// (not a local wall-clock timer, so a refresh mid-hold still resolves to the same step)
+// before the view advances to candidate A's name reveal. No audio is recorded for these
+// lines yet, so this is just a readable pause.
+const FINAL_ROUND_INTRO_HOLD_SECONDS = 8
+
+type FinalRoundStep = 'intro' | 'candidateA' | 'candidateB'
 
 export default function HostPage() {
   const router = useRouter()
@@ -76,6 +102,17 @@ export default function HostPage() {
   const [audioAmplitude, setAudioAmplitude] = useState<number>(0)
   const [isNarrationPlaying, setIsNarrationPlaying] = useState(false)
   const [showEndGamePopover, setShowEndGamePopover] = useState(false)
+  const [codeEventToasts, setCodeEventToasts] = useState<CodeEventToastData[]>([])
+  const codeEventToastIdRef = useRef(0)
+  // Final-round (2 qualified players) scripted campaign sequence — see the dedicated effects
+  // below. finalRoundElapsedSeconds ticks every second off game.electionCycleStartTime;
+  // finalRoundDisplayedStep/Visible drive a crossfade toward whatever step that elapsed
+  // value currently maps to (so a refresh mid-sequence resumes at the right step instead of
+  // restarting at 'intro').
+  const [finalRoundElapsedSeconds, setFinalRoundElapsedSeconds] = useState(0)
+  const [finalRoundDisplayedStep, setFinalRoundDisplayedStep] = useState<FinalRoundStep | null>(null)
+  const [finalRoundStepVisible, setFinalRoundStepVisible] = useState(false)
+  const finalRoundTransitionedRef = useRef(false)
   const narrationAudioRef = useRef<HTMLAudioElement | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
@@ -85,7 +122,7 @@ export default function HostPage() {
   // because getExtendedAnnouncementHostMessages now always returns a fresh object (every
   // status is flattened uniformly), so `content === gameContent[status]` can no longer be
   // used to detect "has content caught up to the current game status yet".
-  const contentStatusRef = useRef<{ status: Game['status'] | undefined; executiveDecision: Game['executiveDecision'] | undefined } | null>(null)
+  const contentStatusRef = useRef<{ status: Game['status'] | undefined; executiveDecision: Game['executiveDecision'] | undefined; isTwistRound: boolean } | null>(null)
   // Guards for the barred_swap_chance pause: prevent re-firing 'activate'/'expire' calls on
   // effect re-runs, and prevent scheduling more than one narration-advance once resolved.
   const swapActivateCalledRef = useRef(false)
@@ -124,6 +161,41 @@ export default function HostPage() {
       return Math.random() * Math.max(0, INTRO_LETTER_SCRAMBLE_MS - INTRO_LETTER_FADE_MS)
     })
   }, [introTitleText, introLucinStart])
+
+  // Final round (2 qualified players) derived state. Candidate ordering is game.players
+  // array order among currently-qualified players (stable join/roster order, same ordering
+  // Right already renders qualified players in) — the first qualified player is "candidate
+  // A", the second is "candidate B". Recomputed from game.players directly (not the
+  // qualifiedPlayers state set by a later effect) so it's correct on the very first render
+  // after entering 'campaign', with no one-render lag.
+  const finalRoundQualifiedPlayers = useMemo(
+    () => (game?.players ?? []).filter(p => p.isQualified),
+    [game?.players]
+  )
+  const isFinalRoundCampaign = game?.status === 'campaign' && finalRoundQualifiedPlayers.length === 2
+  const finalRoundCandidateAName = finalRoundQualifiedPlayers[0]?.name ?? 'TBD'
+  const finalRoundCandidateBName = finalRoundQualifiedPlayers[1]?.name ?? 'TBD'
+  const finalRoundTargetStep: FinalRoundStep | null = !isFinalRoundCampaign
+    ? null
+    : finalRoundElapsedSeconds < FINAL_ROUND_INTRO_HOLD_SECONDS
+      ? 'intro'
+      : finalRoundElapsedSeconds < FINAL_ROUND_CANDIDATE_SPLIT_SECONDS
+        ? 'candidateA'
+        : 'candidateB'
+  const finalRoundCandidateASecondsRemaining = Math.max(0, FINAL_ROUND_CANDIDATE_SPLIT_SECONDS - finalRoundElapsedSeconds)
+  const finalRoundCandidateACountdownDisplay = `${Math.floor(finalRoundCandidateASecondsRemaining / 60)}:${(finalRoundCandidateASecondsRemaining % 60).toString().padStart(2, '0')}`
+  const finalRoundCandidateBSecondsRemaining = Math.max(0, FINAL_ROUND_CAMPAIGN_SECONDS - finalRoundElapsedSeconds)
+  const finalRoundCandidateBCountdownDisplay = `${Math.floor(finalRoundCandidateBSecondsRemaining / 60)}:${(finalRoundCandidateBSecondsRemaining % 60).toString().padStart(2, '0')}`
+
+  // One-time barred-candidate-twist round (see game.activeTwistRound doc in
+  // types/types.ts) — equality against currentRound, not a live qualified-count check,
+  // matching how the server (vote.ts / buildPlayerProjection) identifies the twist round.
+  // Only meaningful while game.status === 'vote'; harmless (and false) otherwise.
+  const isTwistRound = Boolean(
+    game
+    && game.activeTwistRound !== undefined
+    && game.activeTwistRound === game.currentRound
+  )
 
   const handleTransition = useCallback(async () => {
     if (!gameCode) return
@@ -209,6 +281,20 @@ export default function HostPage() {
       router.push('/')
     }
 
+    // Non-blocking banner for the bar_leader / grant_immunity / immunity code effects (see
+    // pages/api/game/[code]/redeem-code.ts) — never gated behind the narration/reveal
+    // sequence, doesn't touch messageIndex/campaign timer state at all. Stays up for the rest
+    // of the current campaign cycle (cleared by the campaign-entry effect below), rather than
+    // auto-dismissing on a fixed timer.
+    const handleCampaignCodeEvent = (data: { type: 'bar_leader' | 'grant_immunity' | 'immunity'; playerName: string }) => {
+      const lines: [string, string, string] = data.type === 'bar_leader'
+        ? ['Your leader entered a code.', 'As a result this player is...', '...barred']
+        : [`${data.playerName} entered a code.`, 'As a result this player is...', '...provided immunity this round from being barred']
+
+      const id = ++codeEventToastIdRef.current
+      setCodeEventToasts(prev => [...prev, { id, lines }])
+    }
+
     socket.on('connect', handleConnect)
     socket.on('disconnect', handleDisconnect)
     socket.on('connect_error', handleConnectError)
@@ -216,6 +302,7 @@ export default function HostPage() {
     socket.on('game-state-update', handleGameStateUpdate)
     socket.on('game-complete', handleGameComplete)
     socket.on('game-deleted', handleGameDeleted)
+    socket.on('campaign-code-event', handleCampaignCodeEvent)
 
     // If socket is already connected (e.g., after page refresh), trigger handleConnect
     if (socket.connected) {
@@ -234,6 +321,7 @@ export default function HostPage() {
       socket.off('game-state-update', handleGameStateUpdate)
       socket.off('game-complete', handleGameComplete)
       socket.off('game-deleted', handleGameDeleted)
+      socket.off('campaign-code-event', handleCampaignCodeEvent)
       socketInitializedRef.current = false
     }
   }, [gameCode, gameExists, hasInitialGameData, router])
@@ -294,6 +382,7 @@ export default function HostPage() {
       contentStatusRef.current
       && contentStatusRef.current.status === game?.status
       && contentStatusRef.current.executiveDecision === game?.executiveDecision
+      && contentStatusRef.current.isTwistRound === isTwistRound
     )
     const hasReachedLastMessage = hasLoadedCurrentStatusContent
       && Array.isArray(content?.hostMessage)
@@ -313,7 +402,7 @@ export default function HostPage() {
     setIsBarredRevealed(
       game?.status === 'announcement' && hasReachedFirstBarredMessage
     )
-  }, [game?.status, game?.executiveDecision, content?.hostMessage, messageIndex])
+  }, [game?.status, game?.executiveDecision, isTwistRound, content?.hostMessage, messageIndex])
 
   // Keep display values in state so UI updates immediately from live game updates.
   useEffect(() => {
@@ -335,11 +424,28 @@ export default function HostPage() {
       return false
     }
 
+    // Twist round mirror image of shouldHideAsBarred above: the twist winner's
+    // isQualified flips to true server-side the instant votes resolve (see vote.ts), well
+    // before Lucin's "your elected leader is..." narration reaches their name — without
+    // this, they'd visibly jump from the barred panel to the qualified panel the moment
+    // 'results' starts, leaking the winner's identity ahead of the reveal gate. Keep them
+    // displayed as barred until isLeaderRevealed flips true (same trigger the leader-glow
+    // highlight already waits on). Only relevant during 'results' — the twist never reaches
+    // 'final', and by 'decision' the reveal has already completed (isLeaderRevealed defaults
+    // true for any status other than results/final).
+    const twistWinnerId = (isTwistRound && game?.status === 'results')
+      ? (nextPlayers.find(p => p.leader)?.id ?? null)
+      : null
+    const shouldHideTwistWinnerAsQualified = (playerId: string): boolean =>
+      Boolean(twistWinnerId && playerId === twistWinnerId && !isLeaderRevealed)
+
     const nextQualifiedPlayers = nextPlayers.filter(p =>
-      p.isQualified || (isCurrentRoundBarredPlayer(p.id) && shouldHideAsBarred(p.id))
+      (p.isQualified && !shouldHideTwistWinnerAsQualified(p.id))
+      || (isCurrentRoundBarredPlayer(p.id) && shouldHideAsBarred(p.id))
     )
     const nextBarredPlayers = nextPlayers.filter(p =>
-      !p.isQualified && !shouldHideAsBarred(p.id)
+      (!p.isQualified && !shouldHideAsBarred(p.id))
+      || shouldHideTwistWinnerAsQualified(p.id)
     )
     const nextSortedBarredPlayers = [...nextBarredPlayers].sort((a, b) => {
       const aRoundIndex = game?.rounds?.findIndex(round => round?.barred?.includes(a.id)) ?? -1
@@ -393,7 +499,7 @@ export default function HostPage() {
     setWinnerName(nextWinnerName)
     setWinnerPoints(nextWinnerPoints)
     setLoserPoints(nextLoserPoints)
-  }, [game, remainingSeconds, isBarredRevealed])
+  }, [game, remainingSeconds, isBarredRevealed, isLeaderRevealed, isTwistRound])
 
   useEffect(() => {
     setIsLoading(!game)
@@ -429,15 +535,16 @@ export default function HostPage() {
   }, [gameCode, isSubscribed])
 
   // Update host messages based on game status; extend announcement for the leader's chosen
-  // executive decision (immunity_code / requalify_code / barred_swap_chance).
+  // executive decision (immunity_code / requalify_code / barred_swap_chance), or extend
+  // vote for the one-time barred-candidate-twist round.
   useEffect(() => {
     if (game?.status) {
       const gameStatus = game.status as keyof typeof gameContent
-      setContent(getExtendedAnnouncementHostMessages(gameStatus, game.executiveDecision))
-      contentStatusRef.current = { status: game.status, executiveDecision: game.executiveDecision }
+      setContent(getExtendedAnnouncementHostMessages(gameStatus, game.executiveDecision, isTwistRound))
+      contentStatusRef.current = { status: game.status, executiveDecision: game.executiveDecision, isTwistRound }
       setMessageIndex(0)
     }
-  }, [game?.status, game?.executiveDecision])
+  }, [game?.status, game?.executiveDecision, isTwistRound])
 
   // True while the narration is sitting on the barred_swap_chance pause marker — this is
   // the ONE case where the generic auto-advancing narration effect below must stand down
@@ -455,8 +562,13 @@ export default function HostPage() {
   useEffect(() => {
     if (!game?.status || !Array.isArray(content?.hostMessage) || messageIndex >= content.hostMessage.length) return
     if (isAtSwapWindowMarker) return
+    // Final round (2 qualified players): the scripted candidate-speech sequence fully
+    // replaces the generic campaign narration/countdown (which would otherwise try to speak
+    // "Time until next election."), so stand down entirely — see the dedicated effects
+    // below.
+    if (isFinalRoundCampaign) return
 
-    const segment = getHostNarrationSegment(game.status, messageIndex, game.executiveDecision)
+    const segment = getHostNarrationSegment(game.status, messageIndex, game.executiveDecision, isTwistRound)
     const delayMs = segment?.pauseAfterMs ?? DEFAULT_HOST_PAUSE_MS
     const isLastMessage = messageIndex >= content.hostMessage.length - 1
     const shouldAutoTransition = AUTO_TRANSITION_STATUSES.includes(game.status)
@@ -592,7 +704,7 @@ export default function HostPage() {
         narrationAudioRef.current = null
       }
     }
-  }, [game?.status, content?.hostMessage, messageIndex, audioRetryTick, handleTransition, isAtSwapWindowMarker])
+  }, [game?.status, content?.hostMessage, messageIndex, audioRetryTick, handleTransition, isAtSwapWindowMarker, isFinalRoundCampaign, isTwistRound])
 
   useEffect(() => {
     if (!autoplayBlocked) return
@@ -697,9 +809,12 @@ export default function HostPage() {
     loserPoints
   ])
 
-  // Update remaining seconds for campaign timer
+  // Update remaining seconds for campaign timer. Final round (2 qualified players) is
+  // excluded entirely — its display/timer is fully replaced by the scripted candidate-speech
+  // sequence below, which owns its own elapsed clock and backup auto-transition (against a
+  // fixed 120s, not game.cycleTime). Every other round is unaffected.
   useEffect(() => {
-    if (game?.status !== 'campaign' || !game.electionCycleStartTime || !game.cycleTime) {
+    if (game?.status !== 'campaign' || !game.electionCycleStartTime || !game.cycleTime || isFinalRoundCampaign) {
       setRemainingSeconds(0)
       return
     }
@@ -718,7 +833,7 @@ export default function HostPage() {
     updateRemaining()
     const interval = setInterval(updateRemaining, 1000)
     return () => clearInterval(interval)
-  }, [game?.status, game?.electionCycleStartTime, game?.cycleTime, handleTransition])
+  }, [game?.status, game?.electionCycleStartTime, game?.cycleTime, handleTransition, isFinalRoundCampaign])
 
   // Reset transition flags when phase changes
   useEffect(() => {
@@ -728,6 +843,130 @@ export default function HostPage() {
 
     autoTransitionedStatusRef.current = null
   }, [game?.status])
+
+  // Code-event toasts (bar_leader/grant_immunity/immunity reveals) are meant to stay up for
+  // "the rest of that campaign time" — clear them the instant the game leaves Campaign, and
+  // again on the way into a fresh Campaign cycle, so nothing lingers from a prior round.
+  useEffect(() => {
+    setCodeEventToasts([])
+  }, [game?.status])
+
+  // Final round (2 qualified players): server-authoritative elapsed clock, ticked every
+  // second off game.electionCycleStartTime (the same field every other campaign round's
+  // timer already uses) rather than a fresh local timer — this is what lets a host page
+  // refresh mid-sequence resume at the correct step instead of restarting. Also owns the
+  // backup client-side auto-transition to 'vote' at FINAL_ROUND_CAMPAIGN_SECONDS, mirroring
+  // the pattern of the normal-round remainingSeconds effect above (the real enforcement is
+  // server-side in update.ts; this is just so the host doesn't sit waiting on a stale poll).
+  useEffect(() => {
+    if (!isFinalRoundCampaign || !game?.electionCycleStartTime) {
+      setFinalRoundElapsedSeconds(0)
+      finalRoundTransitionedRef.current = false
+      return
+    }
+
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - game.electionCycleStartTime) / 1000)
+      setFinalRoundElapsedSeconds(elapsed)
+      if (elapsed >= FINAL_ROUND_CAMPAIGN_SECONDS && !finalRoundTransitionedRef.current) {
+        finalRoundTransitionedRef.current = true
+        handleTransition()
+      }
+    }
+
+    tick()
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [isFinalRoundCampaign, game?.electionCycleStartTime, handleTransition])
+
+  // Final round: crossfade the displayed step toward finalRoundTargetStep (derived above
+  // from the elapsed clock). The very first step of a fresh round — or the step resolved
+  // immediately on a mid-sequence refresh — shows with no fade-in; only step-to-step
+  // ADVANCES fade out then in, using the same INTRO_TEXT_FADE_MS timing as the 'intro'
+  // sequence for consistency.
+  useEffect(() => {
+    if (!isFinalRoundCampaign) {
+      setFinalRoundDisplayedStep(null)
+      setFinalRoundStepVisible(false)
+      return
+    }
+    if (finalRoundTargetStep === null) return
+
+    if (finalRoundDisplayedStep === null) {
+      setFinalRoundDisplayedStep(finalRoundTargetStep)
+      setFinalRoundStepVisible(true)
+      return
+    }
+
+    if (finalRoundTargetStep === finalRoundDisplayedStep) return
+
+    let isCancelled = false
+    setFinalRoundStepVisible(false)
+    const timeout = setTimeout(() => {
+      if (isCancelled) return
+      setFinalRoundDisplayedStep(finalRoundTargetStep)
+      setFinalRoundStepVisible(true)
+    }, INTRO_TEXT_FADE_MS)
+
+    return () => {
+      isCancelled = true
+      clearTimeout(timeout)
+    }
+  }, [isFinalRoundCampaign, finalRoundTargetStep, finalRoundDisplayedStep])
+
+  // Final round: play each displayed step's narration once, in order, with the same
+  // INTRO_AUDIO_GAP_MS gap the 'intro' sequence uses between clips. Fire-and-forget — unlike
+  // 'intro', playback does NOT gate the visual step transitions (those are elapsed-time-
+  // driven, above); this effect just narrates whichever step is currently on screen.
+  // {FINAL_CANDIDATE_NAME} lines have no recorded audio (dynamic per round) and are skipped.
+  useEffect(() => {
+    if (!isFinalRoundCampaign || !finalRoundDisplayedStep) return
+
+    const stepEntries = finalRoundDisplayedStep === 'intro'
+      ? finalRoundCampaignIntro
+      : finalRoundDisplayedStep === 'candidateA'
+        ? finalRoundCampaignCandidateA
+        : finalRoundCampaignCandidateB
+
+    let isCancelled = false
+    const pendingTimeouts: ReturnType<typeof setTimeout>[] = []
+    const pendingAudios: HTMLAudioElement[] = []
+
+    const wait = (ms: number) => new Promise<void>(resolve => {
+      pendingTimeouts.push(setTimeout(resolve, ms))
+    })
+
+    const playClip = (url: string) => new Promise<void>(resolve => {
+      const audio = new Audio(url)
+      pendingAudios.push(audio)
+      audio.crossOrigin = 'anonymous'
+      audio.addEventListener('ended', () => resolve(), { once: true })
+      audio.addEventListener('error', () => resolve(), { once: true })
+      audio.play().catch(() => resolve())
+    })
+
+    const run = async () => {
+      for (let i = 0; i < stepEntries.length; i++) {
+        if (isCancelled) return
+        const entry = stepEntries[i]
+        if (!isDynamicTokenLine(entry.audio)) {
+          const audioUrl = getAudioUrlForText(entry.audio)
+          if (audioUrl) await playClip(audioUrl)
+          if (isCancelled) return
+        }
+        const isLast = i === stepEntries.length - 1
+        if (!isLast) await wait(INTRO_AUDIO_GAP_MS)
+      }
+    }
+
+    run()
+
+    return () => {
+      isCancelled = true
+      pendingTimeouts.forEach(clearTimeout)
+      pendingAudios.forEach(audio => audio.pause())
+    }
+  }, [isFinalRoundCampaign, finalRoundDisplayedStep])
 
   // Reset the swap-window guards whenever narration moves off the pause marker (e.g. a new
   // round with a fresh barred_swap_chance decision reaches it again).
@@ -863,7 +1102,7 @@ export default function HostPage() {
       await wait(INTRO_TEXT_FADE_MS)
       if (isCancelled) return
 
-      // 4. Play title, noun, definition audio in order, back to back.
+      // 4. Play title, noun, definition audio in order — 1.5s gap between each (not after the last).
       const entryZeroClips = [entryZero?.audio, nounEntry?.audio, definitionEntry?.audio]
         .filter((text): text is string => Boolean(text))
       for (let i = 0; i < entryZeroClips.length; i++) {
@@ -871,6 +1110,8 @@ export default function HostPage() {
         const audioUrl = getAudioUrlForText(entryZeroClips[i])
         if (audioUrl) await playClip(audioUrl)
         if (isCancelled) return
+        const isLast = i === entryZeroClips.length - 1
+        if (!isLast) await wait(INTRO_AUDIO_GAP_MS)
       }
       if (isCancelled) return
 
@@ -1014,7 +1255,7 @@ export default function HostPage() {
             pointerEvents: 'none'
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: '60%' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: '40%' }}>
             {introEntryZeroVisible && (
               <>
                 <Text size={4} color='text-primary' bold style={{ fontFamily: 'inherit' }}>
@@ -1042,6 +1283,7 @@ export default function HostPage() {
                   color='text-secondary'
                   style={{
                     fontFamily: 'inherit',
+                    textAlign: 'justify',
                     opacity: introNounVisible ? 1 : 0,
                     transition: `opacity ${INTRO_TEXT_FADE_MS}ms ease`
                   }}
@@ -1061,6 +1303,7 @@ export default function HostPage() {
                   color='text-primary'
                   style={{
                     fontFamily: 'inherit',
+                    textAlign: 'justify',
                     opacity: introDefinitionVisible ? 1 : 0,
                     transition: `opacity ${INTRO_TEXT_FADE_MS}ms ease`
                   }}
@@ -1075,7 +1318,7 @@ export default function HostPage() {
                 color='text-primary'
                 style={{
                   fontFamily: 'inherit',
-                  textAlign: 'center',
+                  textAlign: 'justify',
                   opacity: introContinuationVisible ? 1 : 0,
                   transition: `opacity ${INTRO_TEXT_FADE_MS}ms ease`
                 }}
@@ -1112,7 +1355,11 @@ export default function HostPage() {
           width: '70%',
           height: '100%',
           position: 'relative',
-          paddingTop: '15%',
+          // Campaign gets less top padding than every other status — the countdown needs to
+          // sit higher to leave room below for however many code-event/post announcements
+          // stack up beneath it over the course of the cycle (see CodeEventToast/PostFeed
+          // below).
+          paddingTop: game?.status === 'campaign' ? '6%' : '15%',
           opacity: leftVisible ? 1 : 0,
           transition: `opacity ${INTRO_COMPONENT_FADE_MS}ms ease`
         }}>
@@ -1139,36 +1386,79 @@ export default function HostPage() {
             gap: 8,
             width: '80%'
           }}>
-            {displayedHostMessages.map((message, index) => {
-              const originalIndex = displayedMessageIndices[index] ?? index
-              const isBold = (displayedIsHeading[index] ?? false)
-                || shouldHostMessageBeBold(game?.status, message, originalIndex, game?.executiveDecision)
-              return (
-                <Text key={index} size={isBold ? 1.75 : 1.5} color='text-primary' bold={isBold} style={{ marginBottom: index < displayedHostMessages.length - 1 ? '0.5rem' : 0 }}>
-                  {formatHostMessage(message, {
-                    leaderName,
-                    latestBarredName,
-                    swapCandidateName,
-                    swapResultText,
-                    timeRemaining,
-                    voteProgress,
-                    winnerName,
-                    winnerPoints,
-                    loserPoints
-                  })}
-                </Text>
-              )
-            })}
-            {isAtSwapWindowMarker && game?.swapWindow?.status === 'active' && (
-              <Text size={1.75} color='text-primary' bold style={{ marginBottom: '0.5rem' }}>
-                {swapCandidateName || 'They'} is deciding... {swapCountdownSeconds}s
-              </Text>
+            {isFinalRoundCampaign ? (
+              // Final round (2 qualified players): full replacement for the normal
+              // campaign narration/countdown view above, not an addition to it — see the
+              // dedicated effects driving finalRoundDisplayedStep/Visible.
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  opacity: finalRoundStepVisible ? 1 : 0,
+                  transition: `opacity ${INTRO_TEXT_FADE_MS}ms ease`
+                }}
+              >
+                {finalRoundDisplayedStep === 'intro' && finalRoundCampaignIntro.map((line, i) => (
+                  <Text key={i} size={1.5} color='text-primary'>{line.display}</Text>
+                ))}
+                {finalRoundDisplayedStep === 'candidateA' && (
+                  <>
+                    <Text size={1.5} color='text-primary'>{finalRoundCampaignCandidateA[0]?.display}</Text>
+                    <Text size={1.75} color='text-primary' bold>{finalRoundCandidateAName}</Text>
+                    <Text size={1.75} color='text-primary' bold>{finalRoundCandidateACountdownDisplay}</Text>
+                  </>
+                )}
+                {finalRoundDisplayedStep === 'candidateB' && (
+                  <>
+                    <Text size={1.5} color='text-primary'>{finalRoundCampaignCandidateB[0]?.display}</Text>
+                    <Text size={1.75} color='text-primary' bold>{finalRoundCandidateBName}</Text>
+                    <Text size={1.75} color='text-primary' bold>{finalRoundCandidateBCountdownDisplay}</Text>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                {displayedHostMessages.map((message, index) => {
+                  const originalIndex = displayedMessageIndices[index] ?? index
+                  const isBold = (displayedIsHeading[index] ?? false)
+                    || shouldHostMessageBeBold(game?.status, message, originalIndex, game?.executiveDecision, isTwistRound)
+                  return (
+                    <Text key={index} size={isBold ? 1.75 : 1.5} color='text-primary' bold={isBold} style={{ marginBottom: index < displayedHostMessages.length - 1 ? '0.5rem' : 0 }}>
+                      {formatHostMessage(message, {
+                        leaderName,
+                        latestBarredName,
+                        swapCandidateName,
+                        swapResultText,
+                        timeRemaining,
+                        voteProgress,
+                        winnerName,
+                        winnerPoints,
+                        loserPoints
+                      })}
+                    </Text>
+                  )
+                })}
+                {isAtSwapWindowMarker && game?.swapWindow?.status === 'active' && (
+                  <Text size={1.75} color='text-primary' bold style={{ marginBottom: '0.5rem' }}>
+                    {swapCandidateName || 'They'} is deciding... {swapCountdownSeconds}s
+                  </Text>
+                )}
+              </>
             )}
             {loadError ? (
               <p style={{ textAlign: 'center', color: '#E03E3E', marginTop: 12 }}>
                 Please refresh or check the game code.
               </p>
             ) : null}
+            {game?.status === 'campaign' && <CodeEventToast toasts={codeEventToasts} />}
+            {game?.status === 'campaign' && (
+              <PostFeed
+                posts={(game?.players ?? [])
+                  .filter(p => p.influence === 'post' && p.currentPost)
+                  .map(p => ({ alias: p.postAlias || 'Anonymous', text: p.currentPost as string }))}
+              />
+            )}
           </div>
         </div>
 
@@ -1178,6 +1468,8 @@ export default function HostPage() {
             sortedBarredPlayers={sortedBarredPlayers}
             gameStatus={game?.status}
             isLeaderRevealed={isLeaderRevealed}
+            currentRound={game?.currentRound}
+            isTwistRound={isTwistRound}
           />
         </div>
       </div>

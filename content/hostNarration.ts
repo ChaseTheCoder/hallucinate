@@ -3,6 +3,7 @@ import {
   immunityCodeAnnouncementExtension,
   requalifyCodeAnnouncementExtension,
   barredSwapAnnouncementExtension,
+  barredCandidateTwistVoteExtension,
 } from './content'
 import audioManifestData from './audioManifest.json'
 import { ExecutiveDecisionType, StatusTypes } from '../types/types'
@@ -121,12 +122,19 @@ function getExecutiveDecisionAnnouncementExtension(executiveDecision?: Executive
 // Combine raw entries (base status + any executive-decision extension) BEFORE flattening,
 // so a single flattenHostMessages() pass resolves both — every entry (base or extension)
 // goes through the exact same {id,audio,display,content?} handling either way.
-function getEffectiveHostMessages(status: StatusTypes, executiveDecision?: ExecutiveDecisionType): string[] {
+function getEffectiveHostMessages(status: StatusTypes, executiveDecision?: ExecutiveDecisionType, isTwistRound?: boolean): string[] {
   const baseEntries = gameContent[status]?.hostMessage
   const rawEntries: unknown[] = Array.isArray(baseEntries) ? [...baseEntries] : []
 
   if (status === 'announcement') {
     rawEntries.push(...getExecutiveDecisionAnnouncementExtension(executiveDecision))
+  }
+
+  // One-time barred-candidate-twist round: the normal vote-phase narration plays first,
+  // then these 4 lines are appended — only for the specific round the twist fires in (see
+  // game.activeTwistRound in types/types.ts).
+  if (status === 'vote' && isTwistRound) {
+    rawEntries.push(...barredCandidateTwistVoteExtension)
   }
 
   return flattenHostMessages(rawEntries).map(line => line.audio)
@@ -172,8 +180,8 @@ function computePauseMs(status: StatusTypes, index: number, hostMessages: string
   return DEFAULT_HOST_PAUSE_MS
 }
 
-export function getHostNarrationSegments(status: StatusTypes, executiveDecision?: ExecutiveDecisionType): HostNarrationSegment[] {
-  const hostMessages = getEffectiveHostMessages(status, executiveDecision)
+export function getHostNarrationSegments(status: StatusTypes, executiveDecision?: ExecutiveDecisionType, isTwistRound?: boolean): HostNarrationSegment[] {
+  const hostMessages = getEffectiveHostMessages(status, executiveDecision, isTwistRound)
 
   return hostMessages.map((text, index) => {
     const id = `${status}.hostMessage.${index}`
@@ -191,8 +199,8 @@ export function getHostNarrationSegments(status: StatusTypes, executiveDecision?
   })
 }
 
-export function getHostNarrationSegment(status: StatusTypes, index: number, executiveDecision?: ExecutiveDecisionType): HostNarrationSegment | null {
-  const segments = getHostNarrationSegments(status, executiveDecision)
+export function getHostNarrationSegment(status: StatusTypes, index: number, executiveDecision?: ExecutiveDecisionType, isTwistRound?: boolean): HostNarrationSegment | null {
+  const segments = getHostNarrationSegments(status, executiveDecision, isTwistRound)
   const segment = segments[index] ?? null
 
   if (executiveDecision && (status === 'decision' || status === 'announcement')) {

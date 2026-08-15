@@ -8,13 +8,17 @@ type RightProps = {
 	sortedBarredPlayers?: Game['players']
 	gameStatus?: Game['status']
 	isLeaderRevealed?: boolean
+	currentRound?: number
+	isTwistRound?: boolean
 }
 
 export default function Right({
 	qualifiedPlayers = [],
 	sortedBarredPlayers = [],
 	gameStatus,
-	isLeaderRevealed = false
+	isLeaderRevealed = false,
+	currentRound,
+	isTwistRound = false
 }: RightProps = {}) {
 	const orderIdsEqual = (a: string[], b: string[]) => {
 		if (a.length !== b.length) return false
@@ -36,6 +40,7 @@ export default function Right({
 
 	const [displayVoteMap, setDisplayVoteMap] = useState<Record<string, number>>({})
 	const [revealedVoteMap, setRevealedVoteMap] = useState<Record<string, number>>({})
+	const [barredDisplayVoteMap, setBarredDisplayVoteMap] = useState<Record<string, number>>({})
 	const [qualifiedOrderIds, setQualifiedOrderIds] = useState<string[]>([])
 	const itemRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -119,6 +124,50 @@ export default function Right({
 
 		return () => clearInterval(interval)
 	}, [qualifiedPlayers, isRevealStatus, isLeaderRevealed, revealedVoteMap])
+
+	// Twist-round mirror of the qualified-pool scramble above: during a barred-candidate-twist
+	// round, the players actually being voted on are the barred pool, not the qualified pool
+	// (see game.activeTwistRound in types/types.ts). Kept as an entirely separate state/effect
+	// so it can never interfere with the normal-round qualified animation above — this only
+	// ever drives `barredDisplayVoteMap`, never `displayVoteMap`/`revealedVoteMap`.
+	const shouldAnimateBarredVotes = isTwistRound && gameStatus === 'results'
+
+	useEffect(() => {
+		if (!shouldAnimateBarredVotes) {
+			// Outside the twist-results window there's nothing to animate — and clearing this
+			// (rather than letting stale entries linger) means a player who has since moved
+			// from barred to qualified (the revealed winner) never picks up a leftover scrambled
+			// number if they were ever re-barred in some future round.
+			setBarredDisplayVoteMap({})
+			return
+		}
+
+		if (isLeaderRevealed) {
+			// Reveal window closed: settle on real vote counts for whoever remains barred
+			// (the twist winner has already been moved out of sortedBarredPlayers by this point).
+			const revealedBarredVotes = Object.fromEntries(sortedBarredPlayers.map(player => [player.id, player.votes]))
+			setBarredDisplayVoteMap(prev => voteMapsEqual(prev, revealedBarredVotes) ? prev : revealedBarredVotes)
+			return
+		}
+
+		const getScrambledBarredVotes = () => {
+			const next: Record<string, number> = {}
+			sortedBarredPlayers.forEach(player => {
+				const range = Math.max(10, player.votes + 6)
+				next[player.id] = Math.floor(Math.random() * range)
+			})
+			return next
+		}
+
+		// Set immediately so real votes never flash while reveal is pending.
+		setBarredDisplayVoteMap(getScrambledBarredVotes())
+
+		const interval = setInterval(() => {
+			setBarredDisplayVoteMap(getScrambledBarredVotes())
+		}, 80)
+
+		return () => clearInterval(interval)
+	}, [sortedBarredPlayers, shouldAnimateBarredVotes, isLeaderRevealed])
 
 	useEffect(() => {
 		if (qualifiedOrderIds.length === 0) {
@@ -214,6 +263,7 @@ export default function Right({
 								showVotes={gameStatus === 'vote' || gameStatus === 'results' || gameStatus === 'final' || displayVoteMap[player.id] !== undefined}
 								displayVotes={displayVoteMap[player.id] ?? (shouldShowRealVotes ? player.votes : 0)}
 								isLeaderRevealed={isLeaderRevealed}
+								currentRound={currentRound}
 							/>
 						</div>
 					))
@@ -235,6 +285,9 @@ export default function Right({
                         key={player.id}
                         player={player}
                         barred
+                        showVotes={shouldAnimateBarredVotes}
+                        displayVotes={barredDisplayVoteMap[player.id] ?? player.votes}
+                        currentRound={currentRound}
                     />
                 ))}
             </div>

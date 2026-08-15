@@ -1,5 +1,5 @@
 import type { Game } from '../../types/types'
-import { gameContent, immunityCodeAnnouncementExtension, requalifyCodeAnnouncementExtension, barredSwapAnnouncementExtension } from '../../content/content'
+import { gameContent, immunityCodeAnnouncementExtension, requalifyCodeAnnouncementExtension, barredSwapAnnouncementExtension, barredCandidateTwistVoteExtension } from '../../content/content'
 import { getHostNarrationSegment, flattenHostMessages } from '../../content/hostNarration'
 
 const SUPPORTED_STATUS_MUSIC = new Set<Game['status']>(['join', 'intro', 'rules', 'campaign', 'vote', 'results', 'decision', 'announcement', 'final'])
@@ -24,7 +24,7 @@ export function getJoinMusicUrl() {
 // the raw entries BEFORE a single flatten pass. Callers must not rely on reference
 // equality against gameContent[status] — see the contentStatusRef tracking in
 // pages/host/[code].tsx, which exists specifically because of this.
-export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], executiveDecision?: Game['executiveDecision']) {
+export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], executiveDecision?: Game['executiveDecision'], isTwistRound?: boolean) {
 	const baseContent = gameContent[gameStatus as keyof typeof gameContent]
 	const baseEntries = Array.isArray(baseContent?.hostMessage) ? baseContent.hostMessage : []
 	const rawEntries: unknown[] = [...baseEntries]
@@ -33,6 +33,13 @@ export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], 
 		if (executiveDecision === 'immunity_code') rawEntries.push(...immunityCodeAnnouncementExtension)
 		else if (executiveDecision === 'requalify_code') rawEntries.push(...requalifyCodeAnnouncementExtension)
 		else if (executiveDecision === 'barred_swap_chance') rawEntries.push(...barredSwapAnnouncementExtension)
+	}
+
+	// One-time barred-candidate-twist round: appended after the normal vote-phase narration,
+	// only for the specific round the twist fires in (see game.activeTwistRound in
+	// types/types.ts). Every other vote round is unaffected.
+	if (gameStatus === 'vote' && isTwistRound) {
+		rawEntries.push(...barredCandidateTwistVoteExtension)
 	}
 
 	return { ...baseContent, hostMessage: flattenHostMessages(rawEntries) }
@@ -65,12 +72,12 @@ export function formatHostMessage(
 		.replace('{LOSER_POINTS}', String(tokens.loserPoints ?? 0))
 }
 
-export function shouldHostMessageBeBold(status: Game['status'] | undefined, message: string, originalIndex: number, executiveDecision?: Game['executiveDecision']): boolean {
+export function shouldHostMessageBeBold(status: Game['status'] | undefined, message: string, originalIndex: number, executiveDecision?: Game['executiveDecision'], isTwistRound?: boolean): boolean {
 	if (status === 'join' && originalIndex === 0) return true
 	if (message.startsWith('Phase')) return true
 
 	if (status) {
-		const segment = getHostNarrationSegment(status, originalIndex, executiveDecision)
+		const segment = getHostNarrationSegment(status, originalIndex, executiveDecision, isTwistRound)
 		if (segment?.hasDynamicTokens) return true
 	}
 

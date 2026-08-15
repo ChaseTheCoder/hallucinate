@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { emitRoleBasedGameUpdates, findGameByCode, persistGame } from '../../../../server/gameStore'
+import { assignBarredInfluence, clearBarredInfluence } from '../../../../server/barredInfluence'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 
@@ -105,11 +106,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Invalid target' })
     }
 
-    // Apply the swap
+    // Apply the swap. clearBarredInfluence/assignBarredInfluence are the other two
+    // qualified<->barred transition call sites alongside decision.ts's primary bar and
+    // redeem-code.ts's bar_leader effect — see server/barredInfluence.ts.
     swapPlayer.isQualified = true
+    clearBarredInfluence(game, swapPlayer)
     target.isQualified = false
     target.roundsBarred += 1
     target.votes = 0
+    assignBarredInfluence(game, target)
 
     if (game.rounds[game.currentRound]) {
       game.rounds[game.currentRound].barred.push(target.id)

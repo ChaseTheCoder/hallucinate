@@ -33,6 +33,10 @@ import {
   requalifyCodeAnnouncementExtension,
   barredSwapAnnouncementExtension,
   introductionAnnouncementExtension,
+  finalRoundCampaignIntro,
+  finalRoundCampaignCandidateA,
+  finalRoundCampaignCandidateB,
+  barredCandidateTwistVoteExtension,
 } from '../content/content'
 import { flattenHostMessages, getHostMessageAudioText, isDynamicTokenLine } from '../content/hostNarration'
 import type { StatusTypes } from '../types/types'
@@ -110,6 +114,31 @@ function collectAudioLines(statuses: StatusTypes[]): Map<string, string> {
   // host page's intro-sequence effect, not the generic per-status system) — scan its
   // {audio, display} entries directly, same shape as rules' content, no nesting.
   for (const entry of flattenHostMessages(introductionAnnouncementExtension)) {
+    addLine(lines, getHostMessageAudioText(entry))
+  }
+
+  // Same story as 'intro': the final-round (2 qualified players) scripted sequence is paced
+  // by its own dedicated host-page effect, not gameContent.campaign.hostMessage — scan it
+  // explicitly, always (not gated by the `statuses` filter above). Unlike that, the campaign-
+  // open alert cue now lives directly in gameContent.campaign.hostMessage (a normal 3rd
+  // line, narrated after "Time until next election."), so it's already covered by the
+  // regular per-status scan above whenever 'campaign' is included in `statuses`.
+  for (const entry of flattenHostMessages(finalRoundCampaignIntro)) {
+    addLine(lines, getHostMessageAudioText(entry))
+  }
+  for (const entry of flattenHostMessages(finalRoundCampaignCandidateA)) {
+    addLine(lines, getHostMessageAudioText(entry))
+  }
+  for (const entry of flattenHostMessages(finalRoundCampaignCandidateB)) {
+    addLine(lines, getHostMessageAudioText(entry))
+  }
+
+  // One-time barred-candidate-twist vote extension: appended to 'vote'.hostMessage at
+  // runtime only for the specific round the twist fires in (see
+  // barredCandidateTwistVoteExtension doc in content/content.ts), same story as the
+  // executive-decision announcement extensions above — always scan it, not gated by the
+  // `statuses` filter (it may fire in a game even when this run only targets other statuses).
+  for (const entry of flattenHostMessages(barredCandidateTwistVoteExtension)) {
     addLine(lines, getHostMessageAudioText(entry))
   }
 

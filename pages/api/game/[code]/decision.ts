@@ -1,5 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { emitRoleBasedGameUpdates, findGameByCode, persistGame } from '../../../../server/gameStore'
+import { assignBarredInfluence } from '../../../../server/barredInfluence'
+import { generateUniqueCode } from '../../../../server/codeGenerator'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 import type { ExecutiveDecisionType } from '../../../../types/types'
@@ -21,16 +23,6 @@ interface DecisionSubmission {
   barredId: string
   executiveDecision: ExecutiveDecisionType
   execDecisionTargetId?: string // Required only for barred_swap_chance (the previously-barred player selected)
-}
-
-const CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-
-function generateCode(len: number = 4): string {
-  let s = ''
-  for (let i = 0; i < len; i++) {
-    s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]
-  }
-  return s
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -81,6 +73,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Leader cannot bar themselves' })
   }
 
+  // Defense-in-depth: the client (LeaderDecisionPanel.tsx) already hides the executive-
+  // decision menu and auto-submits 'opt_out' once qualified players <= 4, but never trust
+  // the client alone — coerce any non-opt_out submission to 'opt_out' server-side too.
+  // Qualified count is measured BEFORE this round's primary bar is applied below, matching
+  // the client's totalQualified (decisionCandidates.length + 1).
+  const qualifiedCountBeforeBar = game.players.filter(p => p.isQualified).length
+  const effectiveDecision: ExecutiveDecisionType =
+    qualifiedCountBeforeBar <= 4 ? 'opt_out' : executiveDecision
+
   // Apply primary bar
   barredPlayer.isQualified = false
   barredPlayer.roundsBarred += 1
@@ -90,26 +91,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     game.rounds[game.currentRound].barred.push(barredPlayer.id)
   }
 
-  // Store executive decision
-  game.executiveDecision = executiveDecision
+  // Standard announcement-bar call site — see server/barredInfluence.ts for the other two
+  // (barred_swap_chance's outcome in swap.ts, and the bar_leader code effect in
+  // redeem-code.ts).
+  assignBarredInfluence(game, barredPlayer)
+
+  // Store executive decision (server-coerced value, not necessarily the raw request body)
+  game.executiveDecision = effectiveDecision
 
   // immunity_code / requalify_code: generate a single-use 4-letter code redeemable during
   // the NEXT campaign phase. No leader-selected target — any eligible player who receives
   // the code out-of-band can redeem it. `validForRound` matches game.currentRound once the
   // announcement -> campaign transition increments it (see update.ts).
-  if (executiveDecision === 'immunity_code' || executiveDecision === 'requalify_code') {
-    game.activeCode = {
-      code: generateCode(),
-      type: executiveDecision === 'immunity_code' ? 'immunity' : 'requalify',
+  if (effectiveDecision === 'immunity_code' || effectiveDecision === 'requalify_code') {
+    if (!Array.isArray(game.activeCodes)) game.activeCodes = []
+    game.activeCodes.push({
+      code: generateUniqueCode(game),
+      type: effectiveDecision === 'immunity_code' ? 'immunity' : 'requalify',
       ownerId: leader.id,
+      eligibility: 'any',
       validForRound: game.currentRound + 1,
-    }
+      consumed: false,
+    })
   }
 
   // barred_swap_chance: leader picks a PRE-EXISTING barred player (not the one just barred
   // above) to receive a 25s window, during the announcement reveal, to bar a qualified
   // player in their place and become qualified themselves.
-  if (executiveDecision === 'barred_swap_chance') {
+  if (effectiveDecision === 'barred_swap_chance') {
     if (!execDecisionTargetId) {
       return res.status(400).json({ error: 'execDecisionTargetId required for barred_swap_chance' })
     }
@@ -142,7 +151,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.status(200).json({
     success: true,
     status: game.status,
-    executiveDecision,
+    executiveDecision: effectiveDecision,
     barred: {
       id: barredPlayer.id,
       name: barredPlayer.name

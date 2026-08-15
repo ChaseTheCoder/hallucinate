@@ -1,17 +1,16 @@
-import ButtonLiquid from '../ButtonLiquid'
-
 type PlayerHeaderProps = {
   playerName?: string
   isAdmin: boolean
-  onLeaveGame: () => void
 }
 
-export default function PlayerHeader({ playerName, isAdmin, onLeaveGame }: PlayerHeaderProps) {
+// Leave Game now lives in the bottom nav's "Leave" tab (see components/player/BottomNav.tsx
+// and pages/player/[code].tsx) rather than a top-right button here.
+export default function PlayerHeader({ playerName, isAdmin }: PlayerHeaderProps) {
   return (
     <div
       style={{
         display: 'flex',
-        justifyContent: 'space-between',
+        justifyContent: 'flex-start',
         alignItems: 'center',
         gap: 24,
       }}
@@ -46,7 +45,6 @@ export default function PlayerHeader({ playerName, isAdmin, onLeaveGame }: Playe
           </span>
         )}
       </div>
-      <ButtonLiquid onClick={onLeaveGame}>Leave Game</ButtonLiquid>
     </div>
   )
 }

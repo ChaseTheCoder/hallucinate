@@ -84,7 +84,7 @@ export async function createGame(): Promise<Game> {
     code,
     started: false,
     status: 'join',
-    cycleTime: 15,
+    cycleTime: 45,
     players: [],
     rounds: [],
     currentRound: 0,
@@ -92,6 +92,8 @@ export async function createGame(): Promise<Game> {
     winner: undefined,
     createdAt: Date.now(),
     adminPlayerId: undefined,
+    activeCodes: [],
+    hasTriggeredBarredCandidateTwist: false,
   }
   games[id] = game
   return game
@@ -155,7 +157,17 @@ function normalizeLoadedGame(raw: unknown): Game | null {
     cycleTime: typeof g.cycleTime === 'number' ? g.cycleTime : 300,
     currentRound: typeof g.currentRound === 'number' ? g.currentRound : 0,
     electionCycleStartTime: typeof g.electionCycleStartTime === 'number' ? g.electionCycleStartTime : 0,
-    createdAt: typeof g.createdAt === 'number' ? g.createdAt : Date.now()
+    createdAt: typeof g.createdAt === 'number' ? g.createdAt : Date.now(),
+    // Backward-compat for games persisted before the singular activeCode -> activeCodes
+    // collection migration — old payloads simply have no activeCodes array yet.
+    activeCodes: Array.isArray(g.activeCodes) ? g.activeCodes : [],
+    // Backward-compat for games persisted before the one-time barred-candidate-twist
+    // feature existed — old payloads have neither field, and both must default to
+    // "twist not yet triggered" (never retroactively true).
+    hasTriggeredBarredCandidateTwist: typeof g.hasTriggeredBarredCandidateTwist === 'boolean'
+      ? g.hasTriggeredBarredCandidateTwist
+      : false,
+    activeTwistRound: typeof g.activeTwistRound === 'number' ? g.activeTwistRound : undefined,
   }
 }
 
@@ -218,21 +230,25 @@ export function enrichGame(game: Game): Game {
 }
 
 /**
- * The host's shared screen is visible to every player in the room, so the raw
- * immunity_code/requalify_code text must never reach it — only the code's owner (via
- * buildPlayerProjection) is allowed to see it. Call this on any enriched game object
- * before emitting/returning it as a host payload.
+ * The host's shared screen is visible to every player in the room, so no raw code text
+ * (leader-granted OR barred-influence-granted — see ActiveRoundCode) must ever reach it —
+ * only each code's owner (via buildPlayerProjection) is allowed to see it. Call this on
+ * any enriched game object before emitting/returning it as a host payload.
  */
 export function sanitizeGameForHost(game: Game): Game {
-  if (!game.activeCode) return game
+  if (!game.activeCodes || game.activeCodes.length === 0) return game
   return {
     ...game,
-    activeCode: { ...game.activeCode, code: '' },
+    activeCodes: game.activeCodes.map(c => ({ ...c, code: '' })),
   }
 }
 
 export function buildPlayerProjection(game: Game, player: Player): PlayerProjection {
   const qualifiedPlayers = game.players.filter(p => p.isQualified)
+  // One-time barred-candidate-twist round (see update.ts's campaign -> vote transition and
+  // the crowning branch in vote.ts) — equality against currentRound, not a live qualified
+  // count, since the twist winner's requalification moves that count mid-round.
+  const isTwistRound = game.activeTwistRound === game.currentRound
   const canVote = game.status === 'vote' && !player.hasVoted
   const canDecide = game.status === 'decision' && player.leader
   const canResolveSwap = Boolean(
@@ -247,6 +263,7 @@ export function buildPlayerProjection(game: Game, player: Player): PlayerProject
     status: game.status,
     phase: getPhaseForStep(game.status) ?? undefined,
     contentKey: game.status,
+    qualifiedCount: qualifiedPlayers.length,
     session: {
       playerId: player.id,
       playerName: player.name,
@@ -259,10 +276,16 @@ export function buildPlayerProjection(game: Game, player: Player): PlayerProject
   }
 
   if (canVote) {
+    // Twist round: vote among BARRED candidates instead of qualified ones (the whole point
+    // of the twist — see game.activeTwistRound doc in types/types.ts). Every player still
+    // votes as normal; only the candidate pool changes for this one round.
+    const voteCandidatePool = isTwistRound
+      ? game.players.filter(p => !p.isQualified)
+      : qualifiedPlayers
     projection.vote = {
       hasSubmitted: player.hasVoted,
-      requiredVotes: Math.min(3, qualifiedPlayers.length),
-      candidates: qualifiedPlayers.map(p => ({ id: p.id, name: p.name })),
+      requiredVotes: Math.min(3, voteCandidatePool.length),
+      candidates: voteCandidatePool.map(p => ({ id: p.id, name: p.name })),
     }
   }
 
@@ -280,17 +303,21 @@ export function buildPlayerProjection(game: Game, player: Player): PlayerProject
     }
   }
 
-  // Scoped strictly to the code's owner, and only while it's redeemable this cycle —
-  // never sent to the host or to any other player.
-  if (
-    game.status === 'campaign'
-    && game.activeCode
-    && game.activeCode.ownerId === player.id
-    && game.activeCode.validForRound === game.currentRound
-  ) {
-    projection.activeCode = {
-      code: game.activeCode.code,
-      type: game.activeCode.type,
+  // Scoped strictly to the code's owner, and only during campaign (redeemable window for
+  // leader-granted codes; display-only-but-still-campaign-gated for barred-influence
+  // codes) — never sent to the host or to any other player. At most one owned, unconsumed,
+  // currently-valid code should ever exist per player at a time in practice.
+  if (game.status === 'campaign') {
+    const ownedCode = (game.activeCodes ?? []).find(c =>
+      c.ownerId === player.id
+      && !c.consumed
+      && (c.validForRound === undefined || c.validForRound === game.currentRound)
+    )
+    if (ownedCode) {
+      projection.activeCode = {
+        code: ownedCode.code,
+        type: ownedCode.type,
+      }
     }
   }
 
@@ -305,6 +332,23 @@ export function buildPlayerProjection(game: Game, player: Player): PlayerProject
     projection.swapWindow = {
       deadline: game.swapWindow.deadline,
       candidates: eligibleTargets.map(p => ({ id: p.id, name: p.name })),
+    }
+  }
+
+  // Independent of game.status on purpose — the announcement-phase Popover must durably
+  // show whenever the player opens the app while unacknowledged, not just during
+  // 'announcement' itself (see influenceAcknowledged doc in types/types.ts).
+  if (player.influence) {
+    projection.influence = {
+      type: player.influence,
+      acknowledged: Boolean(player.influenceAcknowledged),
+    }
+
+    if (player.influence === 'post') {
+      projection.post = {
+        alias: player.postAlias,
+        hasPostedThisCycle: Boolean(player.hasPostedThisCycle),
+      }
     }
   }
 

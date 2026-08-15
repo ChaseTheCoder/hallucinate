@@ -31,6 +31,11 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   const status = Array.isArray(rawStatus) ? rawStatus[0] : rawStatus
   const rawExecutiveDecision = req.query.executiveDecision
   const executiveDecision = Array.isArray(rawExecutiveDecision) ? rawExecutiveDecision[0] : rawExecutiveDecision
+  // Preview-only flag for the one-time barred-candidate-twist vote narration extension
+  // (see barredCandidateTwistVoteExtension in content/content.ts) — only meaningful when
+  // status === 'vote'.
+  const rawIsTwistRound = req.query.isTwistRound
+  const isTwistRound = (Array.isArray(rawIsTwistRound) ? rawIsTwistRound[0] : rawIsTwistRound) === 'true'
 
   if (status) {
     if (!isStatus(status)) {
@@ -45,7 +50,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
     res.status(200).json({
       status,
-      segments: getHostNarrationSegments(status, executiveDecision as ExecutiveDecisionType | undefined),
+      segments: getHostNarrationSegments(status, executiveDecision as ExecutiveDecisionType | undefined, isTwistRound),
     })
     return
   }
