@@ -84,7 +84,7 @@ export async function createGame(): Promise<Game> {
     code,
     started: false,
     status: 'join',
-    cycleTime: 45,
+    cycleTime: 300,
     players: [],
     rounds: [],
     currentRound: 0,
