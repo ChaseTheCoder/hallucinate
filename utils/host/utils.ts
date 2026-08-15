@@ -1,8 +1,8 @@
 import type { Game } from '../../types/types'
-import { gameContent, barAnotherAnnouncementExtension, selfImmunityAnnouncementExtension, grantImmunityAnnouncementExtension } from '../../content/content'
-import { getHostNarrationSegment } from '../../content/hostNarration'
+import { gameContent, immunityCodeAnnouncementExtension, requalifyCodeAnnouncementExtension, barredSwapAnnouncementExtension, barredCandidateTwistVoteExtension } from '../../content/content'
+import { getHostNarrationSegment, flattenHostMessages } from '../../content/hostNarration'
 
-const SUPPORTED_STATUS_MUSIC = new Set<Game['status']>(['join', 'rules', 'campaign', 'vote', 'results', 'decision', 'announcement', 'final'])
+const SUPPORTED_STATUS_MUSIC = new Set<Game['status']>(['join', 'intro', 'rules', 'campaign', 'vote', 'results', 'decision', 'announcement', 'final'])
 
 export function getStatusMusicUrl(status?: Game['status'] | null) {
 	if (!status || !SUPPORTED_STATUS_MUSIC.has(status)) return null
@@ -18,41 +18,31 @@ export function getJoinMusicUrl() {
 	return getStatusMusicUrl('join')
 }
 
-export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], executiveDecision?: Game['executiveDecision']) {
+// Every status's hostMessage is now the same {id,audio,display,content?} shape, so this
+// flattens uniformly for all of them — not just rules. It always returns a NEW object
+// (never baseContent as-is), since executive-decision extensions need to be combined with
+// the raw entries BEFORE a single flatten pass. Callers must not rely on reference
+// equality against gameContent[status] — see the contentStatusRef tracking in
+// pages/host/[code].tsx, which exists specifically because of this.
+export function getExtendedAnnouncementHostMessages(gameStatus: Game['status'], executiveDecision?: Game['executiveDecision'], isTwistRound?: boolean) {
 	const baseContent = gameContent[gameStatus as keyof typeof gameContent]
-	if (gameStatus !== 'announcement') return baseContent
+	const baseEntries = Array.isArray(baseContent?.hostMessage) ? baseContent.hostMessage : []
+	const rawEntries: unknown[] = [...baseEntries]
 
-	if (executiveDecision === 'bar_another') {
-		return {
-			...baseContent,
-			hostMessage: [
-				...(baseContent.hostMessage as string[]),
-				...barAnotherAnnouncementExtension
-			]
-		}
+	if (gameStatus === 'announcement') {
+		if (executiveDecision === 'immunity_code') rawEntries.push(...immunityCodeAnnouncementExtension)
+		else if (executiveDecision === 'requalify_code') rawEntries.push(...requalifyCodeAnnouncementExtension)
+		else if (executiveDecision === 'barred_swap_chance') rawEntries.push(...barredSwapAnnouncementExtension)
 	}
 
-	if (executiveDecision === 'self_immunity_next_cycle') {
-		return {
-			...baseContent,
-			hostMessage: [
-				...(baseContent.hostMessage as string[]),
-				...selfImmunityAnnouncementExtension
-			]
-		}
+	// One-time barred-candidate-twist round: appended after the normal vote-phase narration,
+	// only for the specific round the twist fires in (see game.activeTwistRound in
+	// types/types.ts). Every other vote round is unaffected.
+	if (gameStatus === 'vote' && isTwistRound) {
+		rawEntries.push(...barredCandidateTwistVoteExtension)
 	}
 
-	if (executiveDecision === 'grant_immunity_next_cycle') {
-		return {
-			...baseContent,
-			hostMessage: [
-				...(baseContent.hostMessage as string[]),
-				...grantImmunityAnnouncementExtension
-			]
-		}
-	}
-
-	return baseContent
+	return { ...baseContent, hostMessage: flattenHostMessages(rawEntries) }
 }
 
 export function formatHostMessage(
@@ -60,8 +50,8 @@ export function formatHostMessage(
 	tokens: {
 		leaderName?: string | null
 		latestBarredName?: string | null
-		secondBarredName?: string | null
-		grantedImmunityPlayerName?: string | null
+		swapCandidateName?: string | null
+		swapResultText?: string | null
 		timeRemaining?: string | null
 		voteProgress?: string | null
 		winnerName?: string | null
@@ -72,8 +62,9 @@ export function formatHostMessage(
 	return message
 		.replace('{LEADER_NAME}', tokens.leaderName || 'TBD')
 		.replace('{PLAYER_NAME}', tokens.latestBarredName || 'TBD')
-		.replace('{ED1_PLAYER_NAME}', tokens.secondBarredName || 'TBD')
-		.replace('{PLAYER_GRANTED_IMMUNITY}', tokens.grantedImmunityPlayerName || 'TBD')
+		.replace('{SWAP_CANDIDATE_NAME}', tokens.swapCandidateName || 'TBD')
+		.replace('{SWAP_WINDOW}', '')
+		.replace('{SWAP_RESULT}', tokens.swapResultText || '')
 		.replace('{TIME}', tokens.timeRemaining || 'TBD')
 		.replace('{VOTE_PROGRESS}', tokens.voteProgress || '0/0')
 		.replace('{WINNER_NAME}', tokens.winnerName || 'TBD')
@@ -81,12 +72,12 @@ export function formatHostMessage(
 		.replace('{LOSER_POINTS}', String(tokens.loserPoints ?? 0))
 }
 
-export function shouldHostMessageBeBold(status: Game['status'] | undefined, message: string, originalIndex: number, executiveDecision?: Game['executiveDecision']): boolean {
+export function shouldHostMessageBeBold(status: Game['status'] | undefined, message: string, originalIndex: number, executiveDecision?: Game['executiveDecision'], isTwistRound?: boolean): boolean {
 	if (status === 'join' && originalIndex === 0) return true
 	if (message.startsWith('Phase')) return true
 
 	if (status) {
-		const segment = getHostNarrationSegment(status, originalIndex, executiveDecision)
+		const segment = getHostNarrationSegment(status, originalIndex, executiveDecision, isTwistRound)
 		if (segment?.hasDynamicTokens) return true
 	}
 

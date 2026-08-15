@@ -16,7 +16,8 @@ export default function VoteButton({ label, selected = false, onClick, rightCont
         width: '100%',
         padding: '6px 24px',
         display: 'flex',
-        justifyContent: 'flex-start'
+        justifyContent: 'flex-start',
+        outline: selected ? '2px solid var(--color-text-primary)' : 'none'
       }}
     >
       <span style={{ 

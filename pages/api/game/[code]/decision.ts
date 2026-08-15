@@ -1,5 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { emitRoleBasedGameUpdates, findGameByCode, persistGame } from '../../../../server/gameStore'
+import { assignBarredInfluence } from '../../../../server/barredInfluence'
+import { generateUniqueCode } from '../../../../server/codeGenerator'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Server as NetServer, Socket } from 'net'
 import type { ExecutiveDecisionType } from '../../../../types/types'
@@ -20,7 +22,7 @@ interface DecisionSubmission {
   leaderId: string
   barredId: string
   executiveDecision: ExecutiveDecisionType
-  execDecisionTargetId?: string // Required when executiveDecision === 'bar_another'
+  execDecisionTargetId?: string // Required only for barred_swap_chance (the previously-barred player selected)
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -36,7 +38,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Missing leaderId, barredId, or executiveDecision' })
   }
 
-  if (!['bar_another', 'self_immunity_next_cycle', 'grant_immunity_next_cycle', 'opt_out'].includes(executiveDecision)) {
+  if (!['immunity_code', 'requalify_code', 'barred_swap_chance', 'opt_out'].includes(executiveDecision)) {
     return res.status(400).json({ error: 'Invalid executiveDecision value' })
   }
 
@@ -71,6 +73,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Leader cannot bar themselves' })
   }
 
+  // Defense-in-depth: the client (LeaderDecisionPanel.tsx) already hides the executive-
+  // decision menu and auto-submits 'opt_out' once qualified players <= 4, but never trust
+  // the client alone — coerce any non-opt_out submission to 'opt_out' server-side too.
+  // Qualified count is measured BEFORE this round's primary bar is applied below, matching
+  // the client's totalQualified (decisionCandidates.length + 1).
+  const qualifiedCountBeforeBar = game.players.filter(p => p.isQualified).length
+  const effectiveDecision: ExecutiveDecisionType =
+    qualifiedCountBeforeBar <= 4 ? 'opt_out' : executiveDecision
+
   // Apply primary bar
   barredPlayer.isQualified = false
   barredPlayer.roundsBarred += 1
@@ -80,71 +91,52 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     game.rounds[game.currentRound].barred.push(barredPlayer.id)
   }
 
-  // Store executive decision
-  game.executiveDecision = executiveDecision
+  // Standard announcement-bar call site — see server/barredInfluence.ts for the other two
+  // (barred_swap_chance's outcome in swap.ts, and the bar_leader code effect in
+  // redeem-code.ts).
+  assignBarredInfluence(game, barredPlayer)
 
-  // Handle ED1: bar a second qualified player
-  let ed1BarredPlayer: typeof game.players[0] | null = null
-  if (executiveDecision === 'bar_another') {
-    if (!execDecisionTargetId) {
-      return res.status(400).json({ error: 'execDecisionTargetId required for bar_another' })
-    }
+  // Store executive decision (server-coerced value, not necessarily the raw request body)
+  game.executiveDecision = effectiveDecision
 
-    const edTarget = game.players.find(p => p.id === execDecisionTargetId)
-    if (!edTarget) {
-      return res.status(404).json({ error: 'Executive decision target player not found' })
-    }
-    if (!edTarget.isQualified) {
-      return res.status(400).json({ error: 'Executive decision target is already barred' })
-    }
-    if (edTarget.immuneFromBarInRound === game.currentRound) {
-      return res.status(400).json({ error: 'Executive decision target is immune this round' })
-    }
-    if (edTarget.id === leader.id) {
-      return res.status(400).json({ error: 'Leader cannot bar themselves via executive decision' })
-    }
-    if (edTarget.id === barredPlayer.id) {
-      return res.status(400).json({ error: 'Cannot bar the same player twice' })
-    }
-
-    edTarget.isQualified = false
-    edTarget.roundsBarred += 1
-    edTarget.votes = 0
-
-    if (game.rounds[game.currentRound]) {
-      game.rounds[game.currentRound].barred.push(edTarget.id)
-    }
-
-    game.executiveDecisionTargetId = edTarget.id
-    ed1BarredPlayer = edTarget
+  // immunity_code / requalify_code: generate a single-use 4-letter code redeemable during
+  // the NEXT campaign phase. No leader-selected target — any eligible player who receives
+  // the code out-of-band can redeem it. `validForRound` matches game.currentRound once the
+  // announcement -> campaign transition increments it (see update.ts).
+  if (effectiveDecision === 'immunity_code' || effectiveDecision === 'requalify_code') {
+    if (!Array.isArray(game.activeCodes)) game.activeCodes = []
+    game.activeCodes.push({
+      code: generateUniqueCode(game),
+      type: effectiveDecision === 'immunity_code' ? 'immunity' : 'requalify',
+      ownerId: leader.id,
+      eligibility: 'any',
+      validForRound: game.currentRound + 1,
+      consumed: false,
+    })
   }
 
-  // Handle ED2: grant the current leader immunity for next cycle's decision round.
-  if (executiveDecision === 'self_immunity_next_cycle') {
-    leader.immuneFromBarInRound = game.currentRound + 1
-  }
-
-  // Handle ED3: grant another qualified player immunity for next cycle's decision round.
-  let immunityGrantedPlayer: typeof game.players[0] | null = null
-  if (executiveDecision === 'grant_immunity_next_cycle') {
+  // barred_swap_chance: leader picks a PRE-EXISTING barred player (not the one just barred
+  // above) to receive a 25s window, during the announcement reveal, to bar a qualified
+  // player in their place and become qualified themselves.
+  if (effectiveDecision === 'barred_swap_chance') {
     if (!execDecisionTargetId) {
-      return res.status(400).json({ error: 'execDecisionTargetId required for grant_immunity_next_cycle' })
+      return res.status(400).json({ error: 'execDecisionTargetId required for barred_swap_chance' })
     }
 
-    const immunityTarget = game.players.find(p => p.id === execDecisionTargetId)
-    if (!immunityTarget) {
-      return res.status(404).json({ error: 'Immunity target player not found' })
+    const swapTarget = game.players.find(p => p.id === execDecisionTargetId)
+    if (!swapTarget) {
+      return res.status(404).json({ error: 'Swap candidate not found' })
     }
-    if (immunityTarget.id === leader.id) {
-      return res.status(400).json({ error: 'Leader cannot grant fellow immunity to themselves' })
-    }
-    if (!immunityTarget.isQualified) {
-      return res.status(400).json({ error: 'Immunity target must be currently qualified' })
+    // Must already be barred BEFORE this round's primary bar was applied above — exclude
+    // the player just barred this round even though isQualified is now false for them too.
+    if (swapTarget.isQualified || swapTarget.id === barredPlayer.id) {
+      return res.status(400).json({ error: 'Swap candidate must be a player barred in a previous round' })
     }
 
-    immunityTarget.immuneFromBarInRound = game.currentRound + 1
-    game.executiveDecisionTargetId = immunityTarget.id
-    immunityGrantedPlayer = immunityTarget
+    game.swapWindow = {
+      barredPlayerId: swapTarget.id,
+      status: 'pending',
+    }
   }
 
   game.status = 'announcement'
@@ -159,22 +151,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.status(200).json({
     success: true,
     status: game.status,
-    executiveDecision,
+    executiveDecision: effectiveDecision,
     barred: {
       id: barredPlayer.id,
       name: barredPlayer.name
     },
-    ...(ed1BarredPlayer !== null ? {
-      ed1Barred: {
-        id: ed1BarredPlayer.id,
-        name: ed1BarredPlayer.name
-      }
-    } : {}),
-    ...(immunityGrantedPlayer !== null ? {
-      immunityGranted: {
-        id: immunityGrantedPlayer.id,
-        name: immunityGrantedPlayer.name
-      }
-    } : {})
   })
 }

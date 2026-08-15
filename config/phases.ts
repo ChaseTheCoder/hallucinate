@@ -12,6 +12,7 @@ import type { PhaseTypes, StatusTypes } from '../types/types'
  */
 export const STEP_TO_PHASE: Record<StatusTypes, PhaseTypes | null> = {
   join: null,
+  intro: null,
   rules: null,
   campaign: 'campaign',
   vote: 'election',

@@ -132,7 +132,8 @@ export default function VotePanel({
           flexDirection: 'column',
           gap: 8,
           flex: 1,
-          overflowY: 'auto'
+          overflowY: 'auto',
+          padding: '4px'
         }}
       >
         {candidates.map(player => {

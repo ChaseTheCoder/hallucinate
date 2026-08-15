@@ -4,7 +4,20 @@ import { getStatusMusicUrl } from './utils'
 
 const QUIET_VOLUME = 0.05
 const DEFAULT_VOLUME = 0.10
+// Narration/text audio (see pages/host/[code].tsx: `new Audio(segment.audioUrl)` /
+// `new Audio(url)` in the intro sequence) never sets `.volume`, so it plays at the
+// HTMLAudioElement default of 1.0. The 'intro' status's narration clips are played via
+// that same imperative sequence rather than the generic per-status narration system, so
+// they never trigger the isNarrationPlaying-driven ducking below — meaning intro music
+// plays concurrently with intro narration at whatever level is set here. To keep the two
+// perceptually matched (rather than DEFAULT_VOLUME, which is too soft next to narration),
+// intro gets its own default volume constant instead of sharing DEFAULT_VOLUME.
+const INTRO_DEFAULT_VOLUME = 1.0
 const FADE_UP_MS = 2000
+
+function getDefaultVolumeForStatus(status: StatusTypes | null): number {
+  return status === 'intro' ? INTRO_DEFAULT_VOLUME : DEFAULT_VOLUME
+}
 
 /**
  * Determine which status's music should be playing.
@@ -87,7 +100,7 @@ export default function useStatusMusic(gameStatus?: StatusTypes | null, isNarrat
     music.loop = true
     music.preload = 'auto'
     music.crossOrigin = 'anonymous'
-    music.volume = DEFAULT_VOLUME
+    music.volume = getDefaultVolumeForStatus(activeMusicStatus)
     musicAudioRef.current = music
 
     music.play().catch((error: unknown) => {
@@ -116,8 +129,8 @@ export default function useStatusMusic(gameStatus?: StatusTypes | null, isNarrat
       return
     }
 
-    fadeToVolume(music, DEFAULT_VOLUME, FADE_UP_MS)
-  }, [musicUrl, isNarrationPlaying])
+    fadeToVolume(music, getDefaultVolumeForStatus(activeMusicStatus), FADE_UP_MS)
+  }, [musicUrl, isNarrationPlaying, activeMusicStatus])
 
   useEffect(() => {
     return () => {

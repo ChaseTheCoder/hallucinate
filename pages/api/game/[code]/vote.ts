@@ -80,13 +80,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
       }
 
-    // Validate that all voted players exist and are qualified to run for leader
+    // One-time "barred candidate twist" round: candidates on the ballot are BARRED players
+    // instead of qualified ones (see the trigger in update.ts's campaign -> vote
+    // transition). Checked via activeTwistRound === currentRound, not a live qualified-count
+    // check, since the winner's requalification below moves qualified count 3 -> 4 mid-round.
+    const isTwistRound = game.activeTwistRound === game.currentRound
+
+    // Validate that all voted players exist and are eligible candidates for this round —
+    // barred players in the twist round, qualified players otherwise.
     votes.forEach(playerId => {
       const player = game.players.find(p => p.id === playerId)
       if (!player) {
         throw new Error(`Player with ID ${playerId} not found`)
       }
-      if (!player.isQualified) {
+      if (isTwistRound) {
+        if (player.isQualified) {
+          throw new Error(`${player.name} is already qualified and is not on the ballot for this special election`)
+        }
+      } else if (!player.isQualified) {
         throw new Error(`${player.name} is not qualified to run for leader`)
       }
     })
@@ -129,9 +140,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
       })
 
+      // Scoring pool: barred players in the twist round, qualified players otherwise (see
+      // isTwistRound above). Never confuse the two — a live qualified-count check would get
+      // this wrong mid-resolution, since crowning the twist winner below flips their
+      // isQualified to true.
+      const scoringPool = isTwistRound
+        ? game.players.filter(p => !p.isQualified)
+        : game.players.filter(p => p.isQualified)
+
       // Apply round totals only once all connected players have voted.
       game.players.forEach(player => {
-        if (!player.isQualified) {
+        const isCandidateThisRound = scoringPool.some(p => p.id === player.id)
+        if (!isCandidateThisRound) {
           player.votes = 0
           return
         }
@@ -139,11 +159,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       })
 
       // Transition to results or complete and compute leader/winner once all votes are in
-      const qualifiedPlayers = game.players.filter(p => p.isQualified)
-      const sortedPlayers = [...qualifiedPlayers].sort((a, b) => b.votes - a.votes)
+      const sortedPlayers = [...scoringPool].sort((a, b) => b.votes - a.votes)
       const newLeader = sortedPlayers[0]
 
-      if (qualifiedPlayers.length <= 2) {
+      if (isTwistRound) {
+        // Barred candidate twist: the winner is drawn from the BARRED pool (scoringPool
+        // above) rather than the qualified pool. Crowning them both requalifies
+        // (isQualified = true) and makes them leader — they then go through the normal
+        // mandatory decision-phase bar step like any other leader. This never routes to
+        // 'final': the twist only ever fires at qualifiedPlayerCount === 3 (see update.ts),
+        // never <= 2, so there's no ambiguity with the final-round shortcut below.
+        game.status = 'results'
+        game.players.forEach(p => {
+          p.hasVoted = false // Reset for next phase
+        })
+        if (newLeader) {
+          game.players.forEach(p => p.leader = false)
+          newLeader.leader = true
+          newLeader.isQualified = true // twist-round crowning also requalifies the winner
+          if (game.rounds[game.currentRound]) {
+            game.rounds[game.currentRound].leader = newLeader.id
+          }
+        }
+      } else if (scoringPool.length <= 2) {
         // Final election - determine winner
         game.status = 'final'
         game.players.forEach(p => {

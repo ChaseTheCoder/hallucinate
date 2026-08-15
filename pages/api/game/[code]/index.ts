@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { buildPlayerProjection, findGameByCode, enrichGame } from '../../../../server/gameStore'
+import { buildPlayerProjection, findGameByCode, enrichGame, sanitizeGameForHost } from '../../../../server/gameStore'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { code } = req.query
@@ -23,7 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(buildPlayerProjection(enrichGame(game), player))
     }
 
-    return res.status(200).json(enrichGame(game))
+    return res.status(200).json(sanitizeGameForHost(enrichGame(game)))
   }
   res.status(405).end()
 }

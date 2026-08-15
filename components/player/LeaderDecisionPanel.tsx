@@ -2,31 +2,38 @@ import { useState, useEffect } from 'react'
 import ButtonLiquid from '../ButtonLiquid'
 import VoteButton from '../VoteButton'
 import type { ExecutiveDecisionType } from '../../types/types'
+import { EXECUTIVE_DECISION_TITLES, EXECUTIVE_DECISION_PROMPTS } from '../../content/content'
 
-type Phase = 'bar' | 'executive_decision' | 'ed1_target' | 'immunity_target'
+type Phase =
+  | 'bar'
+  | 'executive_decision'
+  | 'immunity_code_confirm'
+  | 'requalify_code_confirm'
+  | 'swap_select'
 
-const EXECUTIVE_DECISIONS: Array<{ id: ExecutiveDecisionType; title: string }> = [
-  {
-    id: 'bar_another',
-    title: 'Bar Another Candidate of Two I Selected for You',
-  },
-  {
-    id: 'self_immunity_next_cycle',
-    title: 'Immunity from Being Barred in Next Cycle',
-  },
-  {
-    id: 'grant_immunity_next_cycle',
-    title: 'Provide Immunity to Fellow Candidate in Next Cycle',
-  },
-  {
-    id: 'opt_out',
-    title: 'Opt Out of Executive Decision',
-  },
+// Eligibility metadata for the leader-facing executive decision menu (display content —
+// titles/prompts — lives in content/content.ts, keyed by the same ExecutiveDecisionType).
+// Eligibility (which of these can appear as one of the 2 randomly-presented options) is
+// filtered in handleBarSubmit below — requalify_code and barred_swap_chance both require at
+// least one pre-existing barred player; immunity_code has no extra precondition. 'opt_out' is
+// intentionally NOT listed here — it's a permanent 3rd menu option (see OPT_OUT_ID) appended
+// alongside the 2 randomly-selected ones below, not part of the random-selection pool. It's
+// also the internal-only fallback auto-submitted (never shown to the leader at all) when
+// qualified players <= 4 (see totalQualified check in handleBarSubmit).
+const EXECUTIVE_DECISIONS: Array<{ id: ExecutiveDecisionType; requiresExistingBarred: boolean }> = [
+  { id: 'immunity_code', requiresExistingBarred: false },
+  { id: 'requalify_code', requiresExistingBarred: true },
+  { id: 'barred_swap_chance', requiresExistingBarred: true },
 ]
+
+// Always offered in addition to the 2 randomly-selected decisions above, every time the ED
+// menu is shown at all — not part of the random-2 pool.
+const OPT_OUT_ID: ExecutiveDecisionType = 'opt_out'
 
 type LeaderDecisionPanelProps = {
   decisionError: string | null
   decisionCandidates: Array<{ id: string; name: string }>
+  decisionBarredCandidates: Array<{ id: string; name: string }>
   isSubmittingDecision: boolean
   onSubmitFinalDecision: (barredId: string, ed: ExecutiveDecisionType, edTargetId?: string) => void
 }
@@ -34,6 +41,7 @@ type LeaderDecisionPanelProps = {
 export default function LeaderDecisionPanel({
   decisionError,
   decisionCandidates,
+  decisionBarredCandidates,
   isSubmittingDecision,
   onSubmitFinalDecision,
 }: LeaderDecisionPanelProps) {
@@ -41,11 +49,8 @@ export default function LeaderDecisionPanel({
   const [visible, setVisible] = useState(true)
   const [barredId, setBarredId] = useState<string | null>(null)
   const [selectedED, setSelectedED] = useState<ExecutiveDecisionType | null>(null)
-  const [executiveDecisionOptions, setExecutiveDecisionOptions] = useState<Array<{ id: ExecutiveDecisionType; title: string }>>([])
-  const [ed1TargetId, setED1TargetId] = useState<string | null>(null)
-  const [ed1Candidates, setED1Candidates] = useState<Array<{ id: string; name: string }>>([])
-  const [immunityTargetId, setImmunityTargetId] = useState<string | null>(null)
-  const [immunityCandidates, setImmunityCandidates] = useState<Array<{ id: string; name: string }>>([])
+  const [executiveDecisionOptions, setExecutiveDecisionOptions] = useState<ExecutiveDecisionType[]>([])
+  const [swapCandidateId, setSwapCandidateId] = useState<string | null>(null)
 
   const transitionTo = (next: Phase, setup?: () => void) => {
     setVisible(false)
@@ -56,70 +61,65 @@ export default function LeaderDecisionPanel({
     }, 300)
   }
 
-  // Reset ED1 target when candidates change
+  // Reset swap candidate selection whenever the barred-candidate pool changes.
   useEffect(() => {
-    setED1TargetId(null)
-  }, [ed1Candidates])
-
-  useEffect(() => {
-    setImmunityTargetId(null)
-  }, [immunityCandidates])
+    setSwapCandidateId(null)
+  }, [decisionBarredCandidates])
 
   const handleBarSubmit = () => {
     if (!barredId) return
 
-    // Executive decisions are only available when there are enough qualified players.
+    // Executive decisions are only available when there are enough qualified players (5+).
     // decisionCandidates excludes the leader, so total qualified = length + 1.
     const totalQualified = decisionCandidates.length + 1
-    if (totalQualified <= 3) {
+    if (totalQualified <= 4) {
       onSubmitFinalDecision(barredId, 'opt_out')
       return
     }
 
-    // Pick 2 random qualified players from remaining candidates (exclude chosen barred player)
-    const pool = decisionCandidates.filter(p => p.id !== barredId)
-    const shuffled = [...pool].sort(() => Math.random() - 0.5)
-    const picked = shuffled.slice(0, 2)
+    const hasExistingBarred = decisionBarredCandidates.length > 0
 
-    const eligibleEDs = EXECUTIVE_DECISIONS.filter(ed => {
-      if (ed.id === 'bar_another') {
-        return picked.length === 2
-      }
-      return true
-    })
+    const eligibleEDs = EXECUTIVE_DECISIONS.filter(ed => !ed.requiresExistingBarred || hasExistingBarred)
 
     const shuffledEDs = [...eligibleEDs].sort(() => Math.random() - 0.5)
     const selectedEDOptions = shuffledEDs.slice(0, Math.min(2, shuffledEDs.length))
 
     transitionTo('executive_decision', () => {
-      setED1Candidates(picked)
-      setImmunityCandidates(pool)
-      setExecutiveDecisionOptions(selectedEDOptions)
+      // 'Make no executive decision' is always appended as a permanent 3rd option — it is
+      // never part of the random-2 selection.
+      setExecutiveDecisionOptions([...selectedEDOptions.map(ed => ed.id), OPT_OUT_ID])
       setSelectedED(null)
     })
   }
 
   const handleEDConfirm = () => {
     if (!selectedED || !barredId) return
-    if (selectedED === 'opt_out') {
+    if (selectedED === 'immunity_code') {
+      transitionTo('immunity_code_confirm')
+    } else if (selectedED === 'requalify_code') {
+      transitionTo('requalify_code_confirm')
+    } else if (selectedED === 'barred_swap_chance') {
+      transitionTo('swap_select')
+    } else if (selectedED === 'opt_out') {
+      // No dedicated confirm screen needed — submits directly from the existing
+      // select+Continue flow, same trigger point as the other options' first click.
       onSubmitFinalDecision(barredId, 'opt_out')
-    } else if (selectedED === 'self_immunity_next_cycle') {
-      onSubmitFinalDecision(barredId, 'self_immunity_next_cycle')
-    } else if (selectedED === 'grant_immunity_next_cycle') {
-      transitionTo('immunity_target')
-    } else {
-      transitionTo('ed1_target')
     }
   }
 
-  const handleED1Confirm = () => {
-    if (!ed1TargetId || !barredId) return
-    onSubmitFinalDecision(barredId, 'bar_another', ed1TargetId)
+  const handleImmunityCodeConfirm = () => {
+    if (!barredId) return
+    onSubmitFinalDecision(barredId, 'immunity_code')
   }
 
-  const handleImmunityConfirm = () => {
-    if (!immunityTargetId || !barredId) return
-    onSubmitFinalDecision(barredId, 'grant_immunity_next_cycle', immunityTargetId)
+  const handleRequalifyCodeConfirm = () => {
+    if (!barredId) return
+    onSubmitFinalDecision(barredId, 'requalify_code')
+  }
+
+  const handleSwapSelectConfirm = () => {
+    if (!barredId || !swapCandidateId) return
+    onSubmitFinalDecision(barredId, 'barred_swap_chance', swapCandidateId)
   }
 
   const panelStyle: React.CSSProperties = {
@@ -156,7 +156,7 @@ export default function LeaderDecisionPanel({
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto', padding: '4px' }}>
           {decisionCandidates.map(player => (
             <VoteButton
               key={player.id}
@@ -189,18 +189,18 @@ export default function LeaderDecisionPanel({
           </h2>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto' }}>
-          {executiveDecisionOptions.map(ed => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto', padding: '4px' }}>
+          {executiveDecisionOptions.map(edId => (
             <ButtonLiquid
-              key={ed.id}
-              onClick={() => setSelectedED(ed.id)}
+              key={edId}
+              onClick={() => setSelectedED(edId)}
               style={{
                 width: '100%',
-                opacity: selectedED === ed.id ? 1 : 0.6,
-                outline: selectedED === ed.id ? '2px solid var(--color-text-primary)' : 'none',
+                opacity: selectedED === edId ? 1 : 0.6,
+                outline: selectedED === edId ? '2px solid var(--color-text-primary)' : 'none',
               }}
             >
-              {ed.title}
+              {EXECUTIVE_DECISION_TITLES[edId]}
             </ButtonLiquid>
           ))}
         </div>
@@ -211,75 +211,90 @@ export default function LeaderDecisionPanel({
             disabled={!selectedED || isSubmittingDecision}
             style={{ width: '100%', opacity: selectedED ? 1 : 0.5, cursor: selectedED ? 'pointer' : 'not-allowed' }}
           >
-            {isSubmittingDecision ? 'Submitting...' : 'Confirm Executive Decision'}
+            Continue
           </ButtonLiquid>
         </div>
       </div>
     )
   }
 
-  // phase === 'ed1_target'
-  if (phase === 'ed1_target') {
+  if (phase === 'immunity_code_confirm' || phase === 'requalify_code_confirm') {
+    const copy = EXECUTIVE_DECISION_PROMPTS[phase === 'immunity_code_confirm' ? 'immunity_code' : 'requalify_code']
+    const onConfirm = phase === 'immunity_code_confirm' ? handleImmunityCodeConfirm : handleRequalifyCodeConfirm
+
     return (
       <div style={panelStyle}>
-        <div style={{ textAlign: 'center' }}>
-          <h2 style={{ color: 'var(--color-text-primary)', margin: '0 0 8px 0', fontWeight: 700 }}>
-            Bar Another Candidate
+        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 16, flex: 1, justifyContent: 'center' }}>
+          <h2 style={{ color: 'var(--color-text-primary)', margin: 0, fontWeight: 700 }}>
+            Confirm Executive Decision
           </h2>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto' }}>
-          {ed1Candidates.map(player => (
-            <VoteButton
-              key={player.id}
-              label={player.name}
-              selected={ed1TargetId === player.id}
-              onClick={() => setED1TargetId(player.id)}
-            />
-          ))}
+          <p style={{ color: '#5A5A5A', margin: 0, lineHeight: 1.5 }}>
+            {copy}
+          </p>
         </div>
 
         <div style={fixedBottomStyle}>
-          <ButtonLiquid
-            onClick={handleED1Confirm}
-            disabled={!ed1TargetId || isSubmittingDecision}
-            style={{ width: '100%', opacity: ed1TargetId ? 1 : 0.5, cursor: ed1TargetId ? 'pointer' : 'not-allowed' }}
-          >
-            {isSubmittingDecision ? 'Submitting...' : 'Confirm'}
-          </ButtonLiquid>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <ButtonLiquid
+              onClick={onConfirm}
+              disabled={isSubmittingDecision}
+              style={{ width: '100%' }}
+            >
+              {isSubmittingDecision ? 'Submitting...' : 'Confirm Choice'}
+            </ButtonLiquid>
+            <ButtonLiquid
+              onClick={() => transitionTo('executive_decision')}
+              disabled={isSubmittingDecision}
+              style={{ width: '100%', opacity: 0.7 }}
+            >
+              Go Back
+            </ButtonLiquid>
+          </div>
         </div>
       </div>
     )
   }
 
-  // phase === 'immunity_target'
+  // phase === 'swap_select'
   return (
     <div style={panelStyle}>
       <div style={{ textAlign: 'center' }}>
         <h2 style={{ color: 'var(--color-text-primary)', margin: '0 0 8px 0', fontWeight: 700 }}>
-          Provide Immunity
+          {EXECUTIVE_DECISION_TITLES.barred_swap_chance}
         </h2>
+        <p style={{ color: '#5A5A5A', margin: 0, lineHeight: 1.5 }}>
+          {EXECUTIVE_DECISION_PROMPTS.barred_swap_chance}
+        </p>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto' }}>
-        {immunityCandidates.map(player => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto', padding: '4px' }}>
+        {decisionBarredCandidates.map(player => (
           <VoteButton
             key={player.id}
             label={player.name}
-            selected={immunityTargetId === player.id}
-            onClick={() => setImmunityTargetId(player.id)}
+            selected={swapCandidateId === player.id}
+            onClick={() => setSwapCandidateId(player.id)}
           />
         ))}
       </div>
 
       <div style={fixedBottomStyle}>
-        <ButtonLiquid
-          onClick={handleImmunityConfirm}
-          disabled={!immunityTargetId || isSubmittingDecision}
-          style={{ width: '100%', opacity: immunityTargetId ? 1 : 0.5, cursor: immunityTargetId ? 'pointer' : 'not-allowed' }}
-        >
-          {isSubmittingDecision ? 'Submitting...' : 'Confirm'}
-        </ButtonLiquid>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <ButtonLiquid
+            onClick={handleSwapSelectConfirm}
+            disabled={!swapCandidateId || isSubmittingDecision}
+            style={{ width: '100%', opacity: swapCandidateId ? 1 : 0.5, cursor: swapCandidateId ? 'pointer' : 'not-allowed' }}
+          >
+            {isSubmittingDecision ? 'Submitting...' : 'Confirm Choice'}
+          </ButtonLiquid>
+          <ButtonLiquid
+            onClick={() => transitionTo('executive_decision')}
+            disabled={isSubmittingDecision}
+            style={{ width: '100%', opacity: 0.7 }}
+          >
+            Go Back
+          </ButtonLiquid>
+        </div>
       </div>
     </div>
   )
